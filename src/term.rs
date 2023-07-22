@@ -68,6 +68,10 @@ impl<'a> Term<'a> {
         Self(Box::new(val))
     }
 
+    pub fn grad(&self) -> f64 {
+        self.0.grad.get()
+    }
+
     /// One-time derivation. Does not update internal gradient values.
     pub fn derive(&self, var: &Self) -> f64 {
         use TermInt::*;
