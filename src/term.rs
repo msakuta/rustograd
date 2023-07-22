@@ -38,15 +38,17 @@ impl<'a> TermInt<'a> {
 
 #[derive(Clone, Debug)]
 struct TermPayload<'a> {
+    name: String,
     value: TermInt<'a>,
     data: f64,
     grad: Cell<f64>,
 }
 
 impl<'a> TermPayload<'a> {
-    fn new(value: TermInt<'a>) -> TermPayload<'a> {
+    fn new(name: String, value: TermInt<'a>) -> TermPayload<'a> {
         let data = value.eval();
         Self {
+            name,
             value,
             data,
             grad: Cell::new(0.),
@@ -60,34 +62,38 @@ pub struct Term<'a>(Box<TermPayload<'a>>);
 impl<'a> Add for &'a Term<'a> {
     type Output = Term<'a>;
     fn add(self, rhs: Self) -> Self::Output {
-        Term::new_payload(TermPayload::new(TermInt::Add(self, rhs)))
+        let name = format!("({} + {})", self.0.name, rhs.0.name);
+        Term::new_payload(TermPayload::new(name, TermInt::Add(self, rhs)))
     }
 }
 
 impl<'a> Sub for &'a Term<'a> {
     type Output = Term<'a>;
     fn sub(self, rhs: Self) -> Self::Output {
-        Term::new_payload(TermPayload::new(TermInt::Sub(self, rhs)))
+        let name = format!("({} - {})", self.0.name, rhs.0.name);
+        Term::new_payload(TermPayload::new(name, TermInt::Sub(self, rhs)))
     }
 }
 
 impl<'a> Mul for &'a Term<'a> {
     type Output = Term<'a>;
     fn mul(self, rhs: Self) -> Self::Output {
-        Term::new_payload(TermPayload::new(TermInt::Mul(self, rhs)))
+        let name = format!("{} * {}", self.0.name, rhs.0.name);
+        Term::new_payload(TermPayload::new(name, TermInt::Mul(self, rhs)))
     }
 }
 
 impl<'a> Div for &'a Term<'a> {
     type Output = Term<'a>;
     fn div(self, rhs: Self) -> Self::Output {
-        Term::new_payload(TermPayload::new(TermInt::Div(self, rhs)))
+        let name = format!("{} / {}", self.0.name, rhs.0.name);
+        Term::new_payload(TermPayload::new(name, TermInt::Div(self, rhs)))
     }
 }
 
 impl<'a> Term<'a> {
-    pub fn new(val: f64) -> Term<'a> {
-        Self(Box::new(TermPayload::new(TermInt::Value(val))))
+    pub fn new(name: String, val: f64) -> Term<'a> {
+        Self(Box::new(TermPayload::new(name, TermInt::Value(val))))
     }
 
     fn new_payload(val: TermPayload<'a>) -> Self {
@@ -106,8 +112,9 @@ impl<'a> Term<'a> {
         for (id, (term, _)) in &map {
             writeln!(
                 writer,
-                "a{} [label=\"data:{}, grad:{}\"];",
+                "a{} [label=\"{} \\ndata:{}, grad:{}\"];",
                 *id,
+                term.name,
                 term.data,
                 term.grad.get()
             )?;
@@ -236,7 +243,7 @@ impl<'a> Term<'a> {
     }
 
     pub fn apply(&'a self, f: fn(f64) -> f64, grad: fn(f64) -> f64) -> Self {
-        Self::new_payload(TermPayload::new(TermInt::UnaryFn(UnaryFnPayload {
+        Self::new_payload(TermPayload::new(self.0.name.clone(), TermInt::UnaryFn(UnaryFnPayload {
             term: self,
             f,
             grad,

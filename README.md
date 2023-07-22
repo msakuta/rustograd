@@ -15,9 +15,9 @@ First, build an expression with usual Rust arithmetics, but wrap the value in `T
 Note that you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
 
 ```rust
-    let a = Term::new(123.);
-    let b = Term::new(321.);
-    let c = Term::new(42.);
+    let a = Term::new("a".to_string(), 123.);
+    let b = Term::new("b".to_string(), 321.);
+    let c = Term::new("c".to_string(), 42.);
     let ab = &a + &b;
     let abc = &ab * &c;
 ```
@@ -37,56 +37,14 @@ Lastly, you can call `backprop` to update all terms at once, much more efficient
 
 ```rust
     abc.backprop();
-    println!("abc: {abc:#?}");
 ```
 
-```raw
-abc: Term(
-    TermPayload {
-        value: Mul(
-            Term(
-                TermPayload {
-                    value: Add(
-                        Term(
-                            TermPayload {
-                                value: Value(
-                                    123.0,
-                                ),
-                                grad: Cell {
-                                    value: 42.0,
-                                },
-                            },
-                        ),
-                        Term(
-                            TermPayload {
-                                value: Value(
-                                    321.0,
-                                ),
-                                grad: Cell {
-                                    value: 42.0,
-                                },
-                            },
-                        ),
-                    ),
-                    grad: Cell {
-                        value: 42.0,
-                    },
-                },
-            ),
-            Term(
-                TermPayload {
-                    value: Value(
-                        42.0,
-                    ),
-                    grad: Cell {
-                        value: 444.0,
-                    },
-                },
-            ),
-        ),
-        grad: Cell {
-            value: 1.0,
-        },
-    },
-)
+It's a little easier to see it with Graphviz than the console, so output the `.dot` file like this:
+
+```rust
+    abcd.dot(&mut std::io::stdout()).unwrap();
 ```
+
+Copy and paste the output into [Graphviz online](https://dreampuf.github.io/GraphvizOnline).
+
+![graphviz](graphviz.svg)

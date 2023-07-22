@@ -8,7 +8,7 @@ fn main() {
 }
 
 fn run_model(a_val: f64) {
-    let a = Term::new(a_val);
+    let a = Term::new("a".to_string(), a_val);
     let sin_a = a.apply(f64::sin, f64::cos);
 
     println!("[{a_val}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
