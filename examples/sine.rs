@@ -1,15 +1,13 @@
-use rustograd::Term;
+use rustograd::RcTerm;
 
 fn main() {
-    for i in -10..=10 {
-        let x = i as f64 / 10. * std::f64::consts::PI;
-        run_model(x);
-    }
-}
-
-fn run_model(a_val: f64) {
-    let a = Term::new("a", a_val);
+    let a = RcTerm::new("a", 0.);
     let sin_a = a.apply("sin", f64::sin, f64::cos);
 
-    println!("[{a_val}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
+    for i in -10..=10 {
+        let x = i as f64 / 10. * std::f64::consts::PI;
+        a.set(x).unwrap();
+        sin_a.eval();
+        println!("[{x}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
+    }
 }

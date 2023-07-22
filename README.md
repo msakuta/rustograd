@@ -50,6 +50,42 @@ Copy and paste the output into [Graphviz online](https://dreampuf.github.io/Grap
 ![graphviz](images/graphviz.svg)
 
 
+## Rc and reference versions
+
+Rustograd terms come in two flavors.
+One is reference-based terms, `Term<'a>`.
+The other is Rc-based terms, `RcTerm`.
+
+The reference-based term is more efficient when you run the calculation only once, since it doesn't have reference counting overhead.
+However, there is a very strict restriction that every intermediate term is required to live as long as the expression is evaluated.
+It means you can't even compile a function below, because the temporary variable `b` will be dropped when the function returns.
+
+```rust
+fn model<'a>() -> (Term<'a>, Term<'a>) {
+    let a = Term::new("a", 1.);
+    let b = Term::new("b", 2.);
+    let ab = &a * &b;
+    (a, ab)
+}
+```
+
+`RcTerm` works even in this case since it is not bounded by any lifetime:
+
+```rust
+fn model() -> (RcTerm, RcTerm) {
+    let a = RcTerm::new("a", 1.);
+    let b = RcTerm::new("b", 2.);
+    let ab = &a * &b;
+    (a, ab)
+}
+```
+
+It is especially handy when you want to put the expression model into a struct, because it would require self-referential struct with `Term<'a>`.
+Current Rust has no way of constructing a self-referential struct explicitly.
+Also you don't have to write these lifetime annotations.
+
+Generally `RcTerm` is more convenient to use, but it adds some cost in reference counting.
+
 ## Adding a unary function
 
 You can add a custom function in the middle of expression tree.
