@@ -1,5 +1,7 @@
 use std::{
     cell::Cell,
+    collections::HashMap,
+    io::Write,
     ops::{Add, Div, Mul, Sub},
 };
 
@@ -20,16 +22,33 @@ enum TermInt<'a> {
     UnaryFn(UnaryFnPayload<'a>),
 }
 
+impl<'a> TermInt<'a> {
+    fn eval(&self) -> f64 {
+        use TermInt::*;
+        match self {
+            Value(val) => *val,
+            Add(lhs, rhs) => lhs.eval() + rhs.eval(),
+            Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
+            Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
+            Div(lhs, rhs) => lhs.eval() / rhs.eval(),
+            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval()),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 struct TermPayload<'a> {
     value: TermInt<'a>,
+    data: f64,
     grad: Cell<f64>,
 }
 
 impl<'a> TermPayload<'a> {
     fn new(value: TermInt<'a>) -> TermPayload<'a> {
+        let data = value.eval();
         Self {
             value,
+            data,
             grad: Cell::new(0.),
         }
     }
@@ -77,6 +96,50 @@ impl<'a> Term<'a> {
 
     pub fn grad(&self) -> f64 {
         self.0.grad.get()
+    }
+
+    /// Write graphviz dot file to the given writer.
+    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        let mut map = HashMap::new();
+        self.accum(&mut map);
+        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
+        for (id, (term, _)) in &map {
+            writeln!(
+                writer,
+                "a{} [label=\"data:{}, grad:{}\"];",
+                *id,
+                term.data,
+                term.grad.get()
+            )?;
+        }
+        for (id, (_, parents)) in &map {
+            for pid in parents {
+                writeln!(writer, "a{} -> a{};", pid, *id)?;
+            }
+        }
+        writeln!(writer, "}}")?;
+        Ok(())
+    }
+
+    fn id(&self) -> usize {
+        self as *const _ as usize
+    }
+
+    fn accum(&'a self, map: &mut HashMap<usize, (&'a TermPayload<'a>, Vec<usize>)>) {
+        use TermInt::*;
+        let parents = match self.0.value {
+            Value(_) => vec![],
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
+                lhs.accum(map);
+                rhs.accum(map);
+                vec![lhs.id(), rhs.id()]
+            }
+            UnaryFn(UnaryFnPayload { term, .. }) => {
+                term.accum(map);
+                vec![term.id()]
+            }
+        };
+        map.insert(self.id(), (&self.0, parents));
     }
 
     /// One-time derivation. Does not update internal gradient values.

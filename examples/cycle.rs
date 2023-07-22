@@ -13,4 +13,5 @@ fn main() {
     println!("a: {a:?}");
     println!("b: {b:?}");
     println!("c: {c:?}");
+    abac.dot(&mut std::io::stdout()).unwrap();
 }
