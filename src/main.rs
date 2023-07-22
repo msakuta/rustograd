@@ -7,6 +7,7 @@ enum TermInt<'a> {
     Sub(&'a Term<'a>, &'a Term<'a>),
     Mul(&'a Term<'a>, &'a Term<'a>),
     Div(&'a Term<'a>, &'a Term<'a>),
+    Exp(&'a Term<'a>),
 }
 
 type Term<'a> = Box<TermInt<'a>>;
@@ -65,6 +66,7 @@ impl<'a> TermInt<'a> {
                         dlhs / rhs.eval() + lhs.eval() / drhs
                     }
                 }
+                Self::Exp(val) => val.derive(var),
             }
         }
     }
@@ -76,7 +78,18 @@ impl<'a> TermInt<'a> {
             Self::Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
             Self::Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
             Self::Div(lhs, rhs) => lhs.eval() / rhs.eval(),
+            Self::Exp(val) => val.eval().exp(),
         }
+    }
+}
+
+trait BoxTermExt<'a> {
+    fn exp(&'a self) -> Self;
+}
+
+impl<'a> BoxTermExt<'a> for Term<'a> {
+    fn exp(&'a self) -> Self {
+        Box::new(TermInt::Exp(self))
     }
 }
 
@@ -101,4 +114,8 @@ fn main() {
     let abcd = &abc / &d;
     let abcd_c = abcd.derive(&c);
     println!("d((a + b) * c / d) / dc = {}", abcd_c);
+
+    let exp_abc = abc.exp();
+    let exp_abc_c = exp_abc.derive(&c);
+    println!("d(exp((a + b) * c)) / dc = {}", exp_abc_c);
 }
