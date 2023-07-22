@@ -4,13 +4,20 @@ use std::{
 };
 
 #[derive(Clone, Debug)]
+struct UnaryFnPayload<'a> {
+    term: &'a Term<'a>,
+    f: fn(f64) -> f64,
+    grad: fn(f64) -> f64,
+}
+
+#[derive(Clone, Debug)]
 enum TermInt<'a> {
     Value(f64),
     Add(&'a Term<'a>, &'a Term<'a>),
     Sub(&'a Term<'a>, &'a Term<'a>),
     Mul(&'a Term<'a>, &'a Term<'a>),
     Div(&'a Term<'a>, &'a Term<'a>),
-    Exp(&'a Term<'a>),
+    UnaryFn(UnaryFnPayload<'a>),
 }
 
 #[derive(Clone, Debug)]
@@ -96,7 +103,7 @@ impl<'a> Term<'a> {
                         dlhs / rhs.eval() + lhs.eval() / drhs
                     }
                 }
-                Exp(val) => val.derive(var),
+                UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(var.eval()) * term.derive(var),
             }
         };
         self.0.grad.set(grad);
@@ -112,7 +119,7 @@ impl<'a> Term<'a> {
                 lhs.clear_grad();
                 rhs.clear_grad();
             }
-            Exp(val) => val.clear_grad(),
+            UnaryFn(UnaryFnPayload { term, .. }) => term.clear_grad(),
         };
     }
 
@@ -138,7 +145,7 @@ impl<'a> Term<'a> {
                     dlhs / rhs.eval() + lhs.eval() / drhs
                 }
             }
-            Exp(val) => val.backprop_rec(grad),
+            UnaryFn(UnaryFnPayload { term, .. }) => term.backprop_rec(grad),
         };
         grad
     }
@@ -157,11 +164,19 @@ impl<'a> Term<'a> {
             Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
             Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
             Div(lhs, rhs) => lhs.eval() / rhs.eval(),
-            Exp(val) => val.eval().exp(),
+            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval()),
         }
     }
 
     pub fn exp(&'a self) -> Self {
-        Self::new_payload(TermPayload::new(TermInt::Exp(self)))
+        self.apply(f64::exp, f64::exp)
+    }
+
+    pub fn apply(&'a self, f: fn(f64) -> f64, grad: fn(f64) -> f64) -> Self {
+        Self::new_payload(TermPayload::new(TermInt::UnaryFn(UnaryFnPayload {
+            term: self,
+            f,
+            grad,
+        })))
     }
 }
