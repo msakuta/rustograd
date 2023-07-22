@@ -37,7 +37,7 @@ fn traverse_stmt(input: &Stmt, terms: &mut Vec<TokenStream2>) {
                         let #name = #path;
                     },
                     _ => {
-                        if let Some(res) = traverse(ex, terms) {
+                        if let Some(res) = traverse_expr(ex, terms) {
                             quote! {
                                 let #name = #res;
                             }
@@ -52,7 +52,7 @@ fn traverse_stmt(input: &Stmt, terms: &mut Vec<TokenStream2>) {
             }
         }
         Stmt::Expr(ex, _) => {
-            traverse(&ex, terms);
+            traverse_expr(&ex, terms);
         }
         _ => (),
     }
@@ -67,11 +67,11 @@ fn format_term(ex: &ExprLit, terms: &mut Vec<TokenStream2>) -> Ident {
     name
 }
 
-fn traverse(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
+fn traverse_expr(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
     match input {
         Expr::Binary(ex) => {
-            let lhs = traverse(&ex.left, terms);
-            let rhs = traverse(&ex.right, terms);
+            let lhs = traverse_expr(&ex.left, terms);
+            let rhs = traverse_expr(&ex.right, terms);
             if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
                 let name = Ident::new(&format!("a{}", terms.len()), ex.span());
                 let binop = match ex.op {
@@ -90,12 +90,29 @@ fn traverse(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
                 None
             }
         }
-        Expr::Paren(ex) => traverse(&ex.expr, terms),
+        Expr::Paren(ex) => traverse_expr(&ex.expr, terms),
         Expr::Lit(lit) => {
             let name = format_term(&lit, terms);
             Some(name)
         }
-        Expr::Path(path) => path.path.segments.first().map(|seg| seg.ident.clone()),
+        Expr::Path(path) => path.path.segments.last().map(|seg| seg.ident.clone()),
+        Expr::Call(call) => {
+            if let (Expr::Path(func), Some(arg)) = (&call.func as &Expr, call.args.first()) {
+                // let func = path.path.segments.last().map(|seg| seg.ident.clone());
+                let name = Ident::new(&format!("a{}", terms.len()), call.span());
+                let mut func_derive = func.clone();
+                if let Some(seg) = func_derive.path.segments.last_mut() {
+                    seg.ident = Ident::new(&format!("{}_derive", seg.ident), func.span());
+                }
+                let ts = quote! {
+                    let #name = #arg.apply(stringify!(#func), #func, #func_derive);
+                };
+                terms.push(ts);
+                Some(name)
+            } else {
+                None
+            }
+        }
         _ => None,
     }
 }
