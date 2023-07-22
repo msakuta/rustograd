@@ -47,4 +47,54 @@ It's a little easier to see it with Graphviz than the console, so output the `.d
 
 Copy and paste the output into [Graphviz online](https://dreampuf.github.io/GraphvizOnline).
 
-![graphviz](graphviz.svg)
+![graphviz](images/graphviz.svg)
+
+
+## Adding a unary function
+
+You can add a custom function in the middle of expression tree.
+
+For example, you can get a term `sin(a)` from `a` by calling `apply` method.
+You need to supply with the function and its derivative as function pointers.
+
+```rust
+    let a = Term::new("a", a_val);
+    let sin_a = a.apply("sin", f64::sin, f64::cos);
+```
+
+You can get the plot of the derivative of the expression by evaluating with various values for the input variable.
+
+```rust
+fn run_model(a_val: f64) {
+    let a = Term::new("a", a_val);
+    let sin_a = a.apply("sin", f64::sin, f64::cos);
+
+    println!("[{a_val}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
+}
+
+for i in -10..=10 {
+    let x = i as f64 / 10. * std::f64::consts::PI;
+    run_model(x);
+}
+```
+
+![sine](images/sine.png)
+
+Of course, this is so stupidly simple example, but it can work with more complex expression.
+
+```rust
+    let a = Term::new("a", a_val);
+    let sin_a = a.apply("sin", f64::sin, f64::cos);
+    let ten = Term::new("5", 5.);
+    let b = &a * &ten;
+    let c = Term::new("c", 0.2);
+    let sin_b = b.apply("sin", f64::sin, f64::cos);
+    let c_sin_b = &c * &sin_b;
+    let all = &sin_a + &c_sin_b;
+```
+
+![mixed_sine_graphviz](images/mixed_sine_graphviz.svg)
+
+![sine](images/mixed_sine.png)
+
+See [mixed_sine.rs](examples/mixed_sine.rs) for the full example.

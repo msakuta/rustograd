@@ -173,7 +173,7 @@ impl<'a> Term<'a> {
                         dlhs / rhs.eval() + lhs.eval() / drhs
                     }
                 }
-                UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(var.eval()) * term.derive(var),
+                UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
             }
         };
         self.0.grad.set(grad);
