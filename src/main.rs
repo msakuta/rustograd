@@ -58,9 +58,9 @@ fn main() {
     let ab_a = ab.derive(&a);
     println!("d(a + b) / da = {:?}", ab_a);
     let abc_a = abc.derive(&a);
-    println!("d((a + b) * c) / da = {:?}", abc_a);
+    println!("d((a + b) * c) / da = {}", abc_a);
     let abc_b = abc.derive(&b);
-    println!("d((a + b) * c) / db = {:?}", abc_b);
+    println!("d((a + b) * c) / db = {}", abc_b);
     let abc_c = abc.derive(&c);
-    println!("d((a + b) * c) / dc = {:?}", abc_c);
+    println!("d((a + b) * c) / dc = {}", abc_c);
 }
