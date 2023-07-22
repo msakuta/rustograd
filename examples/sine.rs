@@ -1,7 +1,7 @@
-use rustograd::RcTerm;
+use rustograd::Term;
 
 fn main() {
-    let a = RcTerm::new("a", 0.);
+    let a = Term::new("a", 0.);
     let sin_a = a.apply("sin", f64::sin, f64::cos);
 
     for i in -10..=10 {

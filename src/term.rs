@@ -14,7 +14,7 @@ struct UnaryFnPayload<'a> {
 
 #[derive(Clone, Debug)]
 enum TermInt<'a> {
-    Value(f64),
+    Value(Cell<f64>),
     Add(&'a Term<'a>, &'a Term<'a>),
     Sub(&'a Term<'a>, &'a Term<'a>),
     Mul(&'a Term<'a>, &'a Term<'a>),
@@ -26,7 +26,7 @@ impl<'a> TermInt<'a> {
     fn eval(&self) -> f64 {
         use TermInt::*;
         match self {
-            Value(val) => *val,
+            Value(val) => val.get(),
             Add(lhs, rhs) => lhs.eval() + rhs.eval(),
             Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
             Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
@@ -93,7 +93,10 @@ impl<'a> Div for &'a Term<'a> {
 
 impl<'a> Term<'a> {
     pub fn new(name: impl Into<String>, val: f64) -> Term<'a> {
-        Self(Box::new(TermPayload::new(name.into(), TermInt::Value(val))))
+        Self(Box::new(TermPayload::new(
+            name.into(),
+            TermInt::Value(Cell::new(val)),
+        )))
     }
 
     fn new_payload(val: TermPayload<'a>) -> Self {
@@ -228,8 +231,8 @@ impl<'a> Term<'a> {
 
     pub fn eval(&self) -> f64 {
         use TermInt::*;
-        match self.0.value {
-            Value(val) => val,
+        match &self.0.value {
+            Value(val) => val.get(),
             Add(lhs, rhs) => lhs.eval() + rhs.eval(),
             Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
             Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
@@ -257,5 +260,14 @@ impl<'a> Term<'a> {
                 grad,
             }),
         ))
+    }
+
+    pub fn set(&self, value: f64) -> Result<(), String> {
+        if let TermInt::Value(ref rv) = self.0.value {
+            rv.set(value);
+            Ok(())
+        } else {
+            Err("Cannot set value to non-leaf nodes".into())
+        }
     }
 }

@@ -101,17 +101,12 @@ You need to supply with the function and its derivative as function pointers.
 You can get the plot of the derivative of the expression by evaluating with various values for the input variable.
 
 ```rust
-fn run_model(a_val: f64) {
-    let a = Term::new("a", a_val);
-    let sin_a = a.apply("sin", f64::sin, f64::cos);
-
-    println!("[{a_val}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
-}
-
-for i in -10..=10 {
-    let x = i as f64 / 10. * std::f64::consts::PI;
-    run_model(x);
-}
+    for i in -10..=10 {
+        let x = i as f64 / 10. * std::f64::consts::PI;
+        a.set(x).unwrap();
+        sin_a.eval();
+        println!("[{x}, {}, {}],", sin_a.eval(), sin_a.derive(&a));
+    }
 ```
 
 ![sine](images/sine.png)

@@ -14,5 +14,10 @@ fn model() -> Model {
 
 fn main() {
     let Model { a, ab } = model();
-    println!("a: {}, ab: {}, d(ab)/da: {}", a.eval(), ab.eval(), ab.derive(&a));
+    println!(
+        "a: {}, ab: {}, d(ab)/da: {}",
+        a.eval(),
+        ab.eval(),
+        ab.derive(&a)
+    );
 }
