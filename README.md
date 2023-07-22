@@ -12,14 +12,14 @@ Inspired by [this video](https://youtu.be/VMj-3S1tku0), it seems not too difficu
 ## Usage
 
 First, build an expression with usual Rust arithmetics, but wrap the value in `Term::Value`.
-Note that you need to take a reference (like `&a`) or cast to a `&Term` if it was a boxed value to apply arithmetics due to how operator overloading works in Rust.
+Note that you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
 
 ```rust
-    let a = Term::Value(123.);
-    let b = Term::Value(321.);
-    let c = Term::Value(42.);
+    let a = TermInt::new(123.);
+    let b = TermInt::new(321.);
+    let c = TermInt::new(42.);
     let ab = &a + &b;
-    let abc = &ab as &Term * &c;
+    let abc = &ab * &c;
 ```
 
 Next, you can derive the expression with any variable and get the coefficient.

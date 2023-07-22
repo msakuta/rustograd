@@ -1,27 +1,32 @@
 use std::ops::{Add, Mul};
 
 #[derive(Clone, Debug)]
-enum Term<'a> {
+enum TermInt<'a> {
     Value(f64),
     Add(&'a Term<'a>, &'a Term<'a>),
     Mul(&'a Term<'a>, &'a Term<'a>),
 }
 
+type Term<'a> = Box<TermInt<'a>>;
+
 impl<'a> Add for &'a Term<'a> {
-    type Output = Box<Term<'a>>;
+    type Output = Term<'a>;
     fn add(self, rhs: Self) -> Self::Output {
-        Box::new(Term::Add(self, rhs))
+        Box::new(TermInt::Add(self, rhs))
     }
 }
 
 impl<'a> Mul for &'a Term<'a> {
-    type Output = Box<Term<'a>>;
+    type Output = Term<'a>;
     fn mul(self, rhs: Self) -> Self::Output {
-        Box::new(Term::Mul(self, rhs))
+        Box::new(TermInt::Mul(self, rhs))
     }
 }
 
-impl<'a> Term<'a> {
+impl<'a> TermInt<'a> {
+    fn new(val: f64) -> Term<'a> {
+        Box::new(TermInt::Value(val))
+    }
     fn derive(&self, var: &Self) -> f64 {
         if self as *const _ == var as *const _ {
             1.
@@ -48,11 +53,11 @@ impl<'a> Term<'a> {
 }
 
 fn main() {
-    let a = Term::Value(123.);
-    let b = Term::Value(321.);
-    let c = Term::Value(42.);
+    let a = TermInt::new(123.);
+    let b = TermInt::new(321.);
+    let c = TermInt::new(42.);
     let ab = &a + &b;
-    let abc = &ab as &Term * &c;
+    let abc = &ab * &c;
     println!("a + b: {:?}", ab);
     println!("(a + b) * c: {:?}", abc);
     let ab_a = ab.derive(&a);
