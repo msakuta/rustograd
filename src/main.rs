@@ -19,6 +19,9 @@ fn main() {
     let abc_c = abc.derive(&c);
     println!("d((a + b) * c) / dc = {}", abc_c);
 
+    abc.backprop();
+    println!("abc: {abc:#?}");
+
     let d = Term::new(2.);
     let abcd = &abc / &d;
     let abcd_c = abcd.derive(&c);
