@@ -21,7 +21,7 @@ fn main() {
     let abcd = &abc / &d;
     let abcd_c = abcd.derive(&c);
     println!("d((a + b) * c / d) / dc = {}", abcd_c);
-    
+
     let exp_abc = abc.exp();
     let exp_abc_c = exp_abc.derive(&c);
     println!("d(exp((a + b) * c)) / dc = {}", exp_abc_c);

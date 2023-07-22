@@ -215,7 +215,7 @@ impl<'a> Term<'a> {
                     dlhs / rhs.eval() + lhs.eval() / drhs
                 }
             }
-            UnaryFn(UnaryFnPayload { term, .. }) => term.backprop_rec(grad),
+            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => term.backprop_rec(g(grad)),
         };
         grad
     }
@@ -239,14 +239,23 @@ impl<'a> Term<'a> {
     }
 
     pub fn exp(&'a self) -> Self {
-        self.apply(f64::exp, f64::exp)
+        self.apply("exp", f64::exp, f64::exp)
     }
 
-    pub fn apply(&'a self, f: fn(f64) -> f64, grad: fn(f64) -> f64) -> Self {
-        Self::new_payload(TermPayload::new(self.0.name.clone(), TermInt::UnaryFn(UnaryFnPayload {
-            term: self,
-            f,
-            grad,
-        })))
+    pub fn apply(
+        &'a self,
+        name: &(impl AsRef<str> + ?Sized),
+        f: fn(f64) -> f64,
+        grad: fn(f64) -> f64,
+    ) -> Self {
+        let name = format!("{}({})", name.as_ref(), self.0.name.clone());
+        Self::new_payload(TermPayload::new(
+            name,
+            TermInt::UnaryFn(UnaryFnPayload {
+                term: self,
+                f,
+                grad,
+            }),
+        ))
     }
 }
