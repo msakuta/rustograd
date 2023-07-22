@@ -129,3 +129,38 @@ Of course, this is so stupidly simple example, but it can work with more complex
 ![sine](images/mixed_sine.png)
 
 See [mixed_sine.rs](examples/mixed_sine.rs) for the full example.
+
+
+## A procedural macro to build expression
+
+It is pretty tedious to write a complex expression like the one above.
+There is a feature flag `macro` which can simplify writing it.
+
+For example, the example above can be written like this:
+
+```rust
+use rustograd_macro::rustograd;
+
+rustograd! {{
+    let a = 0.;
+    let b = a * 5.;
+    let all = sin(a) + 0.2 * sin(b);
+}}
+```
+
+You need to enable the feature flag like below:
+
+```
+cargo r --features macro --example mixed_sine_macro
+```
+
+For a reason in `syn` crate's design, the `rustograd!` macro needs to wrap the contents in double braces `{{}}`.
+
+You need to define functions derivatives by postfixing `_derive` to automatically bind derivatives of the function.
+For example, in the example above, we need `sin` function.
+Its derivative shall have a name `sin_derive`, like below.
+
+```rust
+fn sin(x: f64) -> f64 { x.sin() }
+fn sin_derive(x: f64) -> f64 { x.cos() }
+```

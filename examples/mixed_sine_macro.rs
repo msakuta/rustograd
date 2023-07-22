@@ -22,11 +22,8 @@ fn main() {
 fn build_model() -> (RcTerm, RcTerm) {
     rustograd! {{
         let a = 0.;
-        let sin_a = sin(a);
         let b = a * 5.;
-        let c = 0.2;
-        let c_sin_b = c * sin(b);
-        let all = sin_a + c_sin_b;
+        let all = sin(a) + 0.2 * sin(b);
     }}
     (a, all)
 }
