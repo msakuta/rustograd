@@ -1,9 +1,9 @@
 use rustograd::Term;
 
 fn main() {
-    let a = Term::new("a".to_string(), 1.);
-    let b = Term::new("b".to_string(), 3.);
-    let c = Term::new("c".to_string(), 5.);
+    let a = Term::new("a", 1.);
+    let b = Term::new("b", 3.);
+    let c = Term::new("c", 5.);
     let ab = &a + &b;
     let ac = &a + &c;
     let abac = &ab + &ac;

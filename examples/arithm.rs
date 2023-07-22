@@ -1,9 +1,9 @@
 use rustograd::Term;
 
 fn main() {
-    let a = Term::new("a".to_string(), 123.);
-    let b = Term::new("b".to_string(), 321.);
-    let c = Term::new("c".to_string(), 42.);
+    let a = Term::new("a", 123.);
+    let b = Term::new("b", 321.);
+    let c = Term::new("c", 42.);
     let ab = &a + &b;
     let abc = &ab * &c;
     println!("a + b: {:?}", ab);
@@ -17,7 +17,7 @@ fn main() {
     let abc_c = abc.derive(&c);
     println!("d((a + b) * c) / dc = {}", abc_c);
 
-    let d = Term::new("d".to_string(), 2.);
+    let d = Term::new("d", 2.);
     let abcd = &abc / &d;
     let abcd_c = abcd.derive(&c);
     println!("d((a + b) * c / d) / dc = {}", abcd_c);

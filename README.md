@@ -15,9 +15,9 @@ First, build an expression with usual Rust arithmetics, but wrap the value in `T
 Note that you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
 
 ```rust
-    let a = Term::new("a".to_string(), 123.);
-    let b = Term::new("b".to_string(), 321.);
-    let c = Term::new("c".to_string(), 42.);
+    let a = Term::new("a", 123.);
+    let b = Term::new("b", 321.);
+    let c = Term::new("c", 42.);
     let ab = &a + &b;
     let abc = &ab * &c;
 ```

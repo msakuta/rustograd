@@ -92,8 +92,8 @@ impl<'a> Div for &'a Term<'a> {
 }
 
 impl<'a> Term<'a> {
-    pub fn new(name: String, val: f64) -> Term<'a> {
-        Self(Box::new(TermPayload::new(name, TermInt::Value(val))))
+    pub fn new(name: impl Into<String>, val: f64) -> Term<'a> {
+        Self(Box::new(TermPayload::new(name.into(), TermInt::Value(val))))
     }
 
     fn new_payload(val: TermPayload<'a>) -> Self {
