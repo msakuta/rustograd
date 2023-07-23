@@ -58,8 +58,12 @@ fn traverse_stmt(input: &Stmt, terms: &mut Vec<TokenStream2>) {
     }
 }
 
+fn var_name(terms: &[TokenStream2]) -> String {
+    format!("_a{}", terms.len())
+}
+
 fn format_term(ex: &ExprLit, terms: &mut Vec<TokenStream2>) -> Ident {
-    let name = Ident::new(&format!("a{}", terms.len()), ex.span());
+    let name = Ident::new(&var_name(terms), ex.span());
     let ts = quote! {
         let #name = ::rustograd::RcTerm::new(stringify!(#name), #ex);
     };
@@ -73,7 +77,7 @@ fn traverse_expr(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
             let lhs = traverse_expr(&ex.left, terms);
             let rhs = traverse_expr(&ex.right, terms);
             if let (Some(lhs), Some(rhs)) = (lhs, rhs) {
-                let name = Ident::new(&format!("a{}", terms.len()), ex.span());
+                let name = Ident::new(&var_name(terms), ex.span());
                 let binop = match ex.op {
                     BinOp::Add(_) => quote! { &#lhs + &#rhs },
                     BinOp::Sub(_) => quote! { &#lhs - &#rhs },
@@ -99,7 +103,7 @@ fn traverse_expr(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
         Expr::Call(call) => {
             if let (Expr::Path(func), Some(arg)) = (&call.func as &Expr, call.args.first()) {
                 // let func = path.path.segments.last().map(|seg| seg.ident.clone());
-                let name = Ident::new(&format!("a{}", terms.len()), call.span());
+                let name = Ident::new(&var_name(terms), call.span());
                 let mut func_derive = func.clone();
                 if let Some(seg) = func_derive.path.segments.last_mut() {
                     seg.ident = Ident::new(&format!("{}_derive", seg.ident), func.span());
