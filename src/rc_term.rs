@@ -244,15 +244,7 @@ impl RcTerm {
     }
 
     pub fn eval(&self) -> f64 {
-        use TermInt::*;
-        let val = match &self.0.value {
-            Value(val) => val.get(),
-            Add(lhs, rhs) => lhs.eval() + rhs.eval(),
-            Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
-            Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
-            Div(lhs, rhs) => lhs.eval() / rhs.eval(),
-            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval()),
-        };
+        let val = self.0.value.eval();
         self.0.data.set(val);
         val
     }

@@ -40,7 +40,7 @@ impl<'a> TermInt<'a> {
 struct TermPayload<'a> {
     name: String,
     value: TermInt<'a>,
-    data: f64,
+    data: Cell<f64>,
     grad: Cell<f64>,
 }
 
@@ -50,7 +50,7 @@ impl<'a> TermPayload<'a> {
         Self {
             name,
             value,
-            data,
+            data: Cell::new(data),
             grad: Cell::new(0.),
         }
     }
@@ -118,7 +118,7 @@ impl<'a> Term<'a> {
                 "a{} [label=\"{} \\ndata:{}, grad:{}\"];",
                 *id,
                 term.name,
-                term.data,
+                term.data.get(),
                 term.grad.get()
             )?;
         }
@@ -230,15 +230,9 @@ impl<'a> Term<'a> {
     }
 
     pub fn eval(&self) -> f64 {
-        use TermInt::*;
-        match &self.0.value {
-            Value(val) => val.get(),
-            Add(lhs, rhs) => lhs.eval() + rhs.eval(),
-            Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
-            Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
-            Div(lhs, rhs) => lhs.eval() / rhs.eval(),
-            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval()),
-        }
+        let val = self.0.value.eval();
+        self.0.data.set(val);
+        val
     }
 
     pub fn exp(&'a self) -> Self {
