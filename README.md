@@ -143,8 +143,7 @@ use rustograd_macro::rustograd;
 
 rustograd! {{
     let a = 0.;
-    let b = a * 5.;
-    let all = sin(a) + 0.2 * sin(b);
+    let all = sin(a) + 0.2 * sin(a * 5.);
 }}
 ```
 

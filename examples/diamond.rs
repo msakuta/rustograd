@@ -1,3 +1,5 @@
+//! Dependency graph in diamond shape. It evaluates the same term twice, so the derivative should add up.
+
 use rustograd::Term;
 
 fn main() {

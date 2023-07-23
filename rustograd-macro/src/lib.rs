@@ -105,6 +105,11 @@ fn traverse_expr(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
                 // let func = path.path.segments.last().map(|seg| seg.ident.clone());
                 let name = Ident::new(&var_name(terms), call.span());
                 let mut func_derive = func.clone();
+                let arg = if let Expr::Path(path) = arg {
+                    path.path.segments.last().map(|seg| seg.ident.clone())?
+                } else {
+                    traverse_expr(arg, terms)?
+                };
                 if let Some(seg) = func_derive.path.segments.last_mut() {
                     seg.ident = Ident::new(&format!("{}_derive", seg.ident), func.span());
                 }
