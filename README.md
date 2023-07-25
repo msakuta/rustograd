@@ -49,6 +49,10 @@ Copy and paste the output into [Graphviz online](https://dreampuf.github.io/Grap
 
 ![graphviz](images/graphviz.svg)
 
+Animated sequence of forward and backpropagation:
+
+![animated graphviz](images/backprop.gif)
+
 
 ## Rc and reference versions
 
