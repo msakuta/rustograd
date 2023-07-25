@@ -1,6 +1,6 @@
 use std::{
     cell::Cell,
-    collections::HashMap,
+    collections::BTreeMap,
     io::Write,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
@@ -24,15 +24,15 @@ enum TermInt {
 }
 
 impl TermInt {
-    fn eval(&self) -> f64 {
+    fn eval(&self, callback: &impl Fn(f64)) -> f64 {
         use TermInt::*;
         match self {
             Value(val) => val.get(),
-            Add(lhs, rhs) => lhs.eval() + rhs.eval(),
-            Sub(lhs, rhs) => lhs.eval() - rhs.eval(),
-            Mul(lhs, rhs) => lhs.eval() * rhs.eval(),
-            Div(lhs, rhs) => lhs.eval() / rhs.eval(),
-            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval()),
+            Add(lhs, rhs) => lhs.eval_cb(callback) + rhs.eval_cb(callback),
+            Sub(lhs, rhs) => lhs.eval_cb(callback) - rhs.eval_cb(callback),
+            Mul(lhs, rhs) => lhs.eval_cb(callback) * rhs.eval_cb(callback),
+            Div(lhs, rhs) => lhs.eval_cb(callback) / rhs.eval_cb(callback),
+            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_cb(callback)),
         }
     }
 }
@@ -41,18 +41,18 @@ impl TermInt {
 struct TermPayload {
     name: String,
     value: TermInt,
-    data: Cell<f64>,
-    grad: Cell<f64>,
+    data: Cell<Option<f64>>,
+    grad: Cell<Option<f64>>,
 }
 
 impl TermPayload {
     fn new(name: String, value: TermInt) -> TermPayload {
-        let data = value.eval();
+        let data = value.eval(&|_| ());
         Self {
             name,
             value,
-            data: Cell::new(data),
-            grad: Cell::new(0.),
+            data: Cell::new(Some(data)),
+            grad: Cell::new(None),
         }
     }
 }
@@ -117,22 +117,35 @@ impl RcTerm {
     }
 
     pub fn grad(&self) -> f64 {
-        self.0.grad.get()
+        self.0.grad.get().unwrap()
     }
 
     /// Write graphviz dot file to the given writer.
     pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        let mut map = HashMap::new();
+        let mut map = BTreeMap::new();
         self.accum(&mut map);
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, (term, _)) in &map {
+            let color = if term.grad.get().is_some() {
+                "style=filled fillcolor=\"#ffff7f\""
+            } else if term.data.get().is_some() {
+                "style=filled fillcolor=\"#7fff7f\""
+            } else {
+                ""
+            };
             writeln!(
                 writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\"];",
+                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
                 *id,
                 term.name,
-                term.data.get(),
-                term.grad.get()
+                term.data
+                    .get()
+                    .map(|v| format!("{v}"))
+                    .unwrap_or_else(|| "None".into()),
+                term.grad
+                    .get()
+                    .map(|v| format!("{v:0.2}"))
+                    .unwrap_or_else(|| "None".into())
             )?;
         }
         for (id, (_, parents)) in &map {
@@ -149,7 +162,7 @@ impl RcTerm {
         payload as *const _ as usize
     }
 
-    fn accum<'a>(&'a self, map: &mut HashMap<usize, (&'a TermPayload, Vec<usize>)>) {
+    fn accum<'a>(&'a self, map: &mut BTreeMap<usize, (&'a TermPayload, Vec<usize>)>) {
         use TermInt::*;
         let parents = match &self.0.value {
             Value(_) => vec![],
@@ -193,13 +206,13 @@ impl RcTerm {
                 UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
             }
         };
-        self.0.grad.set(grad);
+        self.0.grad.set(Some(grad));
         grad
     }
 
-    fn clear_grad(&self) {
+    pub fn clear_grad(&self) {
         use TermInt::*;
-        self.0.grad.set(0.);
+        self.0.grad.set(None);
         match &self.0.value {
             Value(_) => (),
             Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
@@ -211,42 +224,70 @@ impl RcTerm {
     }
 
     /// Assign gradient to all nodes
-    fn backprop_rec(&self, grad: f64) -> f64 {
+    fn backprop_rec(&self, grad: f64, callback: &impl Fn(f64)) -> f64 {
         use TermInt::*;
-        self.0.grad.set(self.0.grad.get() + grad);
+        let grad_val = self.0.grad.get().unwrap_or(0.) + grad;
+        self.0.grad.set(Some(grad_val));
+        callback(grad_val);
+        let null_callback = |_| ();
         let grad = match &self.0.value {
             Value(_) => 0.,
-            Add(lhs, rhs) => lhs.backprop_rec(grad) + rhs.backprop_rec(grad),
-            Sub(lhs, rhs) => lhs.backprop_rec(grad) - rhs.backprop_rec(-grad),
+            Add(lhs, rhs) => lhs.backprop_rec(grad, callback) + rhs.backprop_rec(grad, callback),
+            Sub(lhs, rhs) => lhs.backprop_rec(grad, callback) - rhs.backprop_rec(-grad, callback),
             Mul(lhs, rhs) => {
-                let dlhs = lhs.backprop_rec(rhs.eval());
-                let drhs = rhs.backprop_rec(lhs.eval());
-                dlhs * rhs.eval() + lhs.eval() * drhs
+                let dlhs = lhs.backprop_rec(rhs.eval_cb(&null_callback), callback);
+                let drhs = rhs.backprop_rec(lhs.eval_cb(&null_callback), callback);
+                dlhs * rhs.eval_cb(&null_callback) + lhs.eval_cb(&null_callback) * drhs
             }
             Div(lhs, rhs) => {
-                let dlhs = lhs.backprop_rec(1. / rhs.eval());
-                let drhs = rhs.backprop_rec(lhs.eval());
+                let dlhs = lhs.backprop_rec(1. / rhs.eval_cb(&null_callback), callback);
+                let drhs = rhs.backprop_rec(lhs.eval_cb(&null_callback), callback);
                 if drhs == 0. {
-                    dlhs / rhs.eval()
+                    dlhs / rhs.eval_cb(&null_callback)
                 } else {
-                    dlhs / rhs.eval() + lhs.eval() / drhs
+                    dlhs / rhs.eval_cb(&null_callback) + lhs.eval_cb(&null_callback) / drhs
                 }
             }
-            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => term.backprop_rec(g(grad)),
+            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => term.backprop_rec(g(grad), callback),
         };
         grad
     }
 
     /// The entry point to backpropagation
     pub fn backprop(&self) {
-        self.clear_grad();
-        self.backprop_rec(1.);
+        self.backprop_cb(&|_| ());
     }
 
+    /// Backpropagation with a callback for each visited node
+    pub fn backprop_cb(&self, callback: &impl Fn(f64)) {
+        self.clear_grad();
+        self.backprop_rec(1., callback);
+    }
+
+    /// Evaluate value with possibly updated value by [`set`]
     pub fn eval(&self) -> f64 {
-        let val = self.0.value.eval();
-        self.0.data.set(val);
+        self.eval_cb(&|_| ())
+    }
+
+    /// Evaluate value with a callback for each visited node
+    pub fn eval_cb(&self, callback: &impl Fn(f64)) -> f64 {
+        let val = self.0.value.eval(callback);
+        self.0.data.set(Some(val));
+        callback(val);
         val
+    }
+
+    pub fn clear(&self) {
+        use TermInt::*;
+        self.0.data.set(None);
+        match &self.0.value {
+            Value(_) => (),
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
+                lhs.clear();
+                rhs.clear();
+            }
+            UnaryFn(UnaryFnPayload { term, .. }) => term.clear(),
+        };
     }
 
     pub fn exp(&self) -> Self {
