@@ -154,7 +154,11 @@ impl<'a> TapeTerm<'a> {
 
     pub fn set(&self, value: f64) -> Result<(), ()> {
         let mut nodes = self.tape.nodes.borrow_mut();
-        nodes.get_mut(self.idx as usize).ok_or_else(|| ())?.data = value;
+        let node = nodes.get_mut(self.idx as usize).ok_or_else(|| ())?;
+        match &mut node.value {
+            TapeValue::Value(val) => *val = value,
+            _ => return Err(()),
+        }
         Ok(())
     }
 
