@@ -1,7 +1,7 @@
 //! Implementation of shared memory arena for the terms, aka a tape.
 //! See https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
-use std::cell::RefCell;
+use std::{cell::RefCell, io::Write};
 
 #[derive(Default, Debug)]
 pub struct Tape {
@@ -73,6 +73,21 @@ impl Tape {
             idx: idx as u32,
         }
     }
+
+    fn term_name<'a>(&'a self, name: impl Into<String>, value: TapeValue) -> TapeTerm<'a> {
+        let mut nodes = self.nodes.borrow_mut();
+        let idx = nodes.len();
+        nodes.push(TapeNode {
+            name: name.into(),
+            value,
+            data: 0.,
+            grad: 0.,
+        });
+        TapeTerm {
+            tape: self,
+            idx: idx as u32,
+        }
+    }
 }
 
 impl<'a> std::ops::Add for TapeTerm<'a> {
@@ -117,6 +132,65 @@ impl<'a> TapeTerm<'a> {
             let mut nodes = self.tape.nodes.borrow_mut();
             derive(&mut nodes, self.idx, var.idx)
         }
+    }
+
+    pub fn apply(
+        &self,
+        name: &(impl AsRef<str> + ?Sized),
+        f: fn(f64) -> f64,
+        grad: fn(f64) -> f64,
+    ) -> Self {
+        let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        let name = format!("{}({})", name.as_ref(), self_name);
+        self.tape.term_name(
+            name,
+            TapeValue::UnaryFn(UnaryFnPayload {
+                term: self.idx,
+                f,
+                grad,
+            }),
+        )
+    }
+
+    pub fn set(&self, value: f64) -> Result<(), ()> {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        nodes.get_mut(self.idx as usize).ok_or_else(|| ())?.data = value;
+        Ok(())
+    }
+
+    pub fn backprop(&self) {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        clear_grad(&mut nodes);
+        backprop_rec(&mut nodes, self.idx, 1.);
+    }
+
+    /// Write graphviz dot file to the given writer.
+    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        let nodes = self.tape.nodes.borrow();
+        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
+        for (id, term) in nodes.iter().enumerate() {
+            writeln!(
+                writer,
+                "a{} [label=\"{} \\ndata:{}, grad:{}\"];",
+                id, term.name, term.data, term.grad
+            )?;
+        }
+        use TapeValue::*;
+        for (id, term) in nodes.iter().enumerate() {
+            let parents = match term.value {
+                Value(_) => [None, None],
+                Add(lhs, rhs) => [Some(lhs), Some(rhs)],
+                Sub(lhs, rhs) => [Some(lhs), Some(rhs)],
+                Mul(lhs, rhs) => [Some(lhs), Some(rhs)],
+                Div(lhs, rhs) => [Some(lhs), Some(rhs)],
+                UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
+            };
+            for pid in parents.into_iter().filter_map(|v| v) {
+                writeln!(writer, "a{} -> a{};", pid, id)?;
+            }
+        }
+        writeln!(writer, "}}")?;
+        Ok(())
     }
 }
 
@@ -167,5 +241,42 @@ fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
         }
     };
     nodes[idx as usize].grad = grad;
+    grad
+}
+
+fn clear_grad(nodes: &mut [TapeNode]) {
+    for node in nodes {
+        node.grad = 0.;
+    }
+}
+
+/// Assign gradient to all nodes
+fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) -> f64 {
+    use TapeValue::*;
+    nodes[idx as usize].grad += grad;
+    let grad = match nodes[idx as usize].value {
+        Value(_) => 0.,
+        Add(lhs, rhs) => backprop_rec(nodes, lhs, grad) + backprop_rec(nodes, rhs, grad),
+        Sub(lhs, rhs) => backprop_rec(nodes, lhs, grad) - backprop_rec(nodes, rhs, -grad),
+        Mul(lhs, rhs) => {
+            let erhs = eval(nodes, rhs);
+            let elhs = eval(nodes, lhs);
+            let dlhs = backprop_rec(nodes, lhs, erhs);
+            let drhs = backprop_rec(nodes, rhs, elhs);
+            dlhs * erhs + elhs * drhs
+        }
+        Div(lhs, rhs) => {
+            let erhs = eval(nodes, rhs);
+            let elhs = eval(nodes, lhs);
+            let dlhs = backprop_rec(nodes, lhs, 1. / erhs);
+            let drhs = backprop_rec(nodes, rhs, elhs);
+            if drhs == 0. {
+                dlhs / eval(nodes, rhs)
+            } else {
+                dlhs / eval(nodes, rhs) + eval(nodes, lhs) / drhs
+            }
+        }
+        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => backprop_rec(nodes, term, g(grad)),
+    };
     grad
 }
