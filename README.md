@@ -1,6 +1,6 @@
 # Rustograd
 
-An experimental implementation of autograd in Rust
+An experimental implementation of reverse-mode, define-and-run autograd in Rust
 
 ## Overview
 
@@ -11,7 +11,7 @@ Inspired by [this video](https://youtu.be/VMj-3S1tku0), it seems not too difficu
 
 ## Usage
 
-First, build an expression with usual Rust arithmetics, but wrap the value in `Term::Value`.
+First, build an expression with usual Rust arithmetics, but wrap the value in `Term::new`.
 Note that you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
 
 ```rust
@@ -54,11 +54,13 @@ Animated sequence of forward and backpropagation:
 ![animated graphviz](images/backprop.gif)
 
 
-## Rc and reference versions
+## Rc, reference and tape versions
 
-Rustograd terms come in two flavors.
-One is reference-based terms, `Term<'a>`.
-The other is Rc-based terms, `RcTerm`.
+Rustograd terms come in three flavors.
+
+* reference-based terms, `Term<'a>`.
+* Rc-based terms, `RcTerm`.
+* Tape memory arena based terms, `TapeTerm`.
 
 The reference-based term is more efficient when you run the calculation only once, since it doesn't have reference counting overhead.
 However, there is a very strict restriction that every intermediate term is required to live as long as the expression is evaluated.
@@ -88,7 +90,22 @@ It is especially handy when you want to put the expression model into a struct, 
 Current Rust has no way of constructing a self-referential struct explicitly.
 Also you don't have to write these lifetime annotations.
 
-Generally `RcTerm` is more convenient to use, but it adds some cost in reference counting.
+`TapeTerm` uses a shared memory arena called the `Tape`.
+It removes the need of explicit management of the lifetimes and has ergonomic arithmetic operation (since it is a copy type), but you need to pass around the arena object.
+See [this tutorial](https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation) for more details.
+
+```rust
+fn model(tape: &Tape) -> (TapeTerm, TapeTerm) {
+    let a = tape.term("a", 1.);
+    let b = tape.term("b", 2.);
+    let ab = a * b;
+    (a, ab)
+}
+```
+
+Generally `RcTerm` is the most convenient to use, but it adds some cost in reference counting.
+`TapeTerm` is fairly convenient and if you don't mind carrying around a reference to `tape` object everywhere, probably it is the most efficient and ergonomic way.
+The tape is expected to be more efficient because the nodes are allocated in a contiguous memory and they will keep being accessed throughout training.
 
 ## Adding a unary function
 

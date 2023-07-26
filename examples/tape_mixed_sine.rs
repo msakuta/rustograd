@@ -16,7 +16,7 @@ fn main() {
     all.dot(&mut std::io::stdout()).unwrap();
 }
 
-fn build_model<'a>(tape: &'a Tape) -> (TapeTerm<'a>, TapeTerm<'a>) {
+fn build_model(tape: &Tape) -> (TapeTerm, TapeTerm) {
     let a = tape.term("a", 0.);
     let sin_a = a.apply("sin", f64::sin, f64::cos);
     let b = a * tape.term("5", 5.);
