@@ -278,33 +278,35 @@ fn clear_grad(nodes: &mut [TapeNode]) {
 }
 
 /// Assign gradient to all nodes
-fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) -> f64 {
+fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) {
     use TapeValue::*;
-    let bef = nodes[idx as usize].grad;
     nodes[idx as usize].grad += grad;
-    let grad = match nodes[idx as usize].value {
-        Value(_) => 0.,
-        Add(lhs, rhs) => backprop_rec(nodes, lhs, grad) + backprop_rec(nodes, rhs, grad),
-        Sub(lhs, rhs) => backprop_rec(nodes, lhs, grad) - backprop_rec(nodes, rhs, -grad),
+    match nodes[idx as usize].value {
+        Value(_) => (),
+        Add(lhs, rhs) => {
+            backprop_rec(nodes, lhs, grad);
+            backprop_rec(nodes, rhs, grad);
+        }
+        Sub(lhs, rhs) => {
+            backprop_rec(nodes, lhs, grad);
+            backprop_rec(nodes, rhs, -grad);
+        }
         Mul(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            let dlhs = backprop_rec(nodes, lhs, grad * erhs);
-            let drhs = backprop_rec(nodes, rhs, grad * elhs);
-            dlhs * erhs + elhs * drhs
+            backprop_rec(nodes, lhs, grad * erhs);
+            backprop_rec(nodes, rhs, grad * elhs);
         }
         Div(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            let drhs = backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
-            let dlhs = backprop_rec(nodes, lhs, grad / erhs);
-            dlhs / erhs - elhs / erhs / erhs * drhs
+            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
+            backprop_rec(nodes, lhs, grad / erhs);
         }
-        Neg(term) => -backprop_rec(nodes, term, -grad),
+        Neg(term) => backprop_rec(nodes, term, -grad),
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
             let val = value(nodes, term);
             backprop_rec(nodes, term, grad * g(val))
         }
-    };
-    grad
+    }
 }
