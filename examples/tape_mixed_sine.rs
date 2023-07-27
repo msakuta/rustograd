@@ -9,7 +9,10 @@ fn main() {
     for i in -40..=40 {
         let x = i as f64 / 20. * std::f64::consts::PI;
         a.set(x).unwrap();
-        writeln!(file, "{x}, {}, {}", all.eval(), all.derive(&a)).unwrap();
+        let value = all.eval();
+        all.backprop();
+        let grad = a.grad();
+        writeln!(file, "{x}, {value}, {}, {grad}", all.derive(&a)).unwrap();
     }
     a.set(0.).unwrap();
     all.backprop();
