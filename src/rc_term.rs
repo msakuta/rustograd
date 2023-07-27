@@ -20,6 +20,7 @@ enum TermInt {
     Sub(RcTerm, RcTerm),
     Mul(RcTerm, RcTerm),
     Div(RcTerm, RcTerm),
+    Neg(RcTerm),
     UnaryFn(UnaryFnPayload),
 }
 
@@ -32,6 +33,7 @@ impl TermInt {
             Sub(lhs, rhs) => lhs.eval_cb(callback) - rhs.eval_cb(callback),
             Mul(lhs, rhs) => lhs.eval_cb(callback) * rhs.eval_cb(callback),
             Div(lhs, rhs) => lhs.eval_cb(callback) / rhs.eval_cb(callback),
+            Neg(term) => term.eval_cb(callback),
             UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_cb(callback)),
         }
     }
@@ -104,6 +106,14 @@ impl Div for &RcTerm {
     }
 }
 
+impl<'a> std::ops::Neg for &RcTerm {
+    type Output = RcTerm;
+    fn neg(self) -> Self::Output {
+        let name = format!("-{}", self.0.name);
+        RcTerm::new_payload(TermPayload::new(name, TermInt::Neg(self.clone())))
+    }
+}
+
 impl RcTerm {
     pub fn new(name: impl Into<String>, val: f64) -> RcTerm {
         Self(Rc::new(TermPayload::new(
@@ -171,7 +181,7 @@ impl RcTerm {
                 rhs.accum(map);
                 vec![lhs.id(), rhs.id()]
             }
-            UnaryFn(UnaryFnPayload { term, .. }) => {
+            Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => {
                 term.accum(map);
                 vec![term.id()]
             }
@@ -203,6 +213,7 @@ impl RcTerm {
                         dlhs / rhs.eval() + lhs.eval() / drhs
                     }
                 }
+                Neg(term) => -term.derive(var),
                 UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
             }
         };
@@ -219,7 +230,7 @@ impl RcTerm {
                 lhs.clear_grad();
                 rhs.clear_grad();
             }
-            UnaryFn(UnaryFnPayload { term, .. }) => term.clear_grad(),
+            Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => term.clear_grad(),
         };
     }
 
@@ -248,6 +259,7 @@ impl RcTerm {
                     dlhs / rhs.eval_cb(&null_callback) + lhs.eval_cb(&null_callback) / drhs
                 }
             }
+            Neg(term) => term.backprop_rec(-grad, callback),
             UnaryFn(UnaryFnPayload { term, grad: g, .. }) => term.backprop_rec(g(grad), callback),
         };
         grad
@@ -286,7 +298,7 @@ impl RcTerm {
                 lhs.clear();
                 rhs.clear();
             }
-            UnaryFn(UnaryFnPayload { term, .. }) => term.clear(),
+            Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => term.clear(),
         };
     }
 
