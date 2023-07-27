@@ -181,9 +181,16 @@ impl<'a> TapeTerm<'a> {
         let nodes = self.tape.nodes.borrow();
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
+            let color = if term.grad != 0. {
+                "style=filled fillcolor=\"#ffff7f\""
+            } else if term.data != 0. {
+                "style=filled fillcolor=\"#7fff7f\""
+            } else {
+                ""
+            };
             writeln!(
                 writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\"];",
+                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
                 id, term.name, term.data, term.grad
             )?;
         }
@@ -205,6 +212,10 @@ impl<'a> TapeTerm<'a> {
         writeln!(writer, "}}")?;
         Ok(())
     }
+
+    pub fn grad(&self) -> f64 {
+        self.tape.nodes.borrow()[self.idx as usize].grad
+    }
 }
 
 fn eval(nodes: &mut [TapeNode], idx: u32) -> f64 {
@@ -220,6 +231,10 @@ fn eval(nodes: &mut [TapeNode], idx: u32) -> f64 {
     };
     nodes[idx as usize].data = data;
     data
+}
+
+fn value(nodes: &[TapeNode], idx: u32) -> f64 {
+    nodes[idx as usize].data
 }
 
 /// wrt - The variable to derive With Respect To
@@ -239,23 +254,20 @@ fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
         Mul(lhs, rhs) => {
             let dlhs = derive(nodes, lhs, wrt);
             let drhs = derive(nodes, rhs, wrt);
-            dlhs * eval(nodes, rhs) + eval(nodes, lhs) * drhs
+            dlhs * value(nodes, rhs) + value(nodes, lhs) * drhs
         }
         Div(lhs, rhs) => {
             let dlhs = derive(nodes, lhs, wrt);
             let drhs = derive(nodes, rhs, wrt);
-            if drhs == 0. {
-                dlhs / eval(nodes, rhs)
-            } else {
-                dlhs / eval(nodes, rhs) + eval(nodes, lhs) / drhs
-            }
+            let elhs = value(nodes, lhs);
+            let erhs = value(nodes, rhs);
+            dlhs / erhs - elhs / erhs / erhs * drhs
         }
         Neg(term) => -derive(nodes, term, wrt),
         UnaryFn(UnaryFnPayload { term, grad, .. }) => {
-            grad(eval(nodes, term)) * derive(nodes, term, wrt)
+            grad(value(nodes, term)) * derive(nodes, term, wrt)
         }
     };
-    nodes[idx as usize].grad = grad;
     grad
 }
 
@@ -268,31 +280,31 @@ fn clear_grad(nodes: &mut [TapeNode]) {
 /// Assign gradient to all nodes
 fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) -> f64 {
     use TapeValue::*;
+    let bef = nodes[idx as usize].grad;
     nodes[idx as usize].grad += grad;
     let grad = match nodes[idx as usize].value {
         Value(_) => 0.,
         Add(lhs, rhs) => backprop_rec(nodes, lhs, grad) + backprop_rec(nodes, rhs, grad),
         Sub(lhs, rhs) => backprop_rec(nodes, lhs, grad) - backprop_rec(nodes, rhs, -grad),
         Mul(lhs, rhs) => {
-            let erhs = eval(nodes, rhs);
-            let elhs = eval(nodes, lhs);
-            let dlhs = backprop_rec(nodes, lhs, erhs);
-            let drhs = backprop_rec(nodes, rhs, elhs);
+            let erhs = value(nodes, rhs);
+            let elhs = value(nodes, lhs);
+            let dlhs = backprop_rec(nodes, lhs, grad * erhs);
+            let drhs = backprop_rec(nodes, rhs, grad * elhs);
             dlhs * erhs + elhs * drhs
         }
         Div(lhs, rhs) => {
-            let erhs = eval(nodes, rhs);
-            let elhs = eval(nodes, lhs);
-            let dlhs = backprop_rec(nodes, lhs, 1. / erhs);
-            let drhs = backprop_rec(nodes, rhs, elhs);
-            if drhs == 0. {
-                dlhs / eval(nodes, rhs)
-            } else {
-                dlhs / eval(nodes, rhs) + eval(nodes, lhs) / drhs
-            }
+            let erhs = value(nodes, rhs);
+            let elhs = value(nodes, lhs);
+            let drhs = backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
+            let dlhs = backprop_rec(nodes, lhs, grad / erhs);
+            dlhs / erhs - elhs / erhs / erhs * drhs
         }
-        Neg(term) => backprop_rec(nodes, term, grad),
-        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => backprop_rec(nodes, term, g(grad)),
+        Neg(term) => -backprop_rec(nodes, term, -grad),
+        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+            let val = value(nodes, term);
+            backprop_rec(nodes, term, grad * g(val))
+        }
     };
     grad
 }
