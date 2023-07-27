@@ -22,7 +22,6 @@ fn build_model(tape: &Tape) -> (TapeTerm, TapeTerm) {
     let b = a * tape.term("5", 5.);
     let c = tape.term("c", 0.2);
     let sin_b = b.apply("sin", f64::sin, f64::cos);
-    let c_sin_b = c * sin_b;
-    let all = sin_a + c_sin_b;
+    let all = sin_a + c * sin_b;
     (a, all)
 }

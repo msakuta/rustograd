@@ -30,6 +30,7 @@ enum TapeValue {
     Sub(u32, u32),
     Mul(u32, u32),
     Div(u32, u32),
+    Neg(u32),
     UnaryFn(UnaryFnPayload),
 }
 
@@ -118,6 +119,13 @@ impl<'a> std::ops::Div for TapeTerm<'a> {
     }
 }
 
+impl<'a> std::ops::Neg for TapeTerm<'a> {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        self.tape.term0(TapeValue::Neg(self.idx))
+    }
+}
+
 impl<'a> TapeTerm<'a> {
     pub fn eval(&self) -> f64 {
         let mut nodes = self.tape.nodes.borrow_mut();
@@ -187,6 +195,7 @@ impl<'a> TapeTerm<'a> {
                 Sub(lhs, rhs) => [Some(lhs), Some(rhs)],
                 Mul(lhs, rhs) => [Some(lhs), Some(rhs)],
                 Div(lhs, rhs) => [Some(lhs), Some(rhs)],
+                Neg(term) => [Some(term), None],
                 UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
             };
             for pid in parents.into_iter().filter_map(|v| v) {
@@ -206,6 +215,7 @@ fn eval(nodes: &mut [TapeNode], idx: u32) -> f64 {
         Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
         Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
         Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
+        Neg(term) => -eval(nodes, term),
         UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
     };
     nodes[idx as usize].data = data;
@@ -240,6 +250,7 @@ fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
                 dlhs / eval(nodes, rhs) + eval(nodes, lhs) / drhs
             }
         }
+        Neg(term) => -derive(nodes, term, wrt),
         UnaryFn(UnaryFnPayload { term, grad, .. }) => {
             grad(eval(nodes, term)) * derive(nodes, term, wrt)
         }
@@ -280,6 +291,7 @@ fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) -> f64 {
                 dlhs / eval(nodes, rhs) + eval(nodes, lhs) / drhs
             }
         }
+        Neg(term) => backprop_rec(nodes, term, grad),
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => backprop_rec(nodes, term, g(grad)),
     };
     grad
