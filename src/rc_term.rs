@@ -33,7 +33,7 @@ impl TermInt {
             Sub(lhs, rhs) => lhs.eval_cb(callback) - rhs.eval_cb(callback),
             Mul(lhs, rhs) => lhs.eval_cb(callback) * rhs.eval_cb(callback),
             Div(lhs, rhs) => lhs.eval_cb(callback) / rhs.eval_cb(callback),
-            Neg(term) => term.eval_cb(callback),
+            Neg(term) => -term.eval_cb(callback),
             UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_cb(callback)),
         }
     }
@@ -205,19 +205,16 @@ impl RcTerm {
                     dlhs * rhs.eval() + lhs.eval() * drhs
                 }
                 Div(lhs, rhs) => {
+                    let elhs = lhs.eval();
+                    let erhs = rhs.eval();
                     let dlhs = lhs.derive(var);
                     let drhs = rhs.derive(var);
-                    if drhs == 0. {
-                        dlhs / rhs.eval()
-                    } else {
-                        dlhs / rhs.eval() + lhs.eval() / drhs
-                    }
+                    dlhs / erhs - elhs / erhs / erhs * drhs
                 }
                 Neg(term) => -term.derive(var),
                 UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
             }
         };
-        self.0.grad.set(Some(grad));
         grad
     }
 
@@ -235,34 +232,38 @@ impl RcTerm {
     }
 
     /// Assign gradient to all nodes
-    fn backprop_rec(&self, grad: f64, callback: &impl Fn(f64)) -> f64 {
+    fn backprop_rec(&self, grad: f64, callback: &impl Fn(f64)) {
         use TermInt::*;
         let grad_val = self.0.grad.get().unwrap_or(0.) + grad;
         self.0.grad.set(Some(grad_val));
         callback(grad_val);
         let null_callback = |_| ();
-        let grad = match &self.0.value {
-            Value(_) => 0.,
-            Add(lhs, rhs) => lhs.backprop_rec(grad, callback) + rhs.backprop_rec(grad, callback),
-            Sub(lhs, rhs) => lhs.backprop_rec(grad, callback) - rhs.backprop_rec(-grad, callback),
+        match &self.0.value {
+            Value(_) => (),
+            Add(lhs, rhs) => {
+                lhs.backprop_rec(grad, callback);
+                rhs.backprop_rec(grad, callback);
+            }
+            Sub(lhs, rhs) => {
+                lhs.backprop_rec(grad, callback);
+                rhs.backprop_rec(-grad, callback);
+            }
             Mul(lhs, rhs) => {
-                let dlhs = lhs.backprop_rec(rhs.eval_cb(&null_callback), callback);
-                let drhs = rhs.backprop_rec(lhs.eval_cb(&null_callback), callback);
-                dlhs * rhs.eval_cb(&null_callback) + lhs.eval_cb(&null_callback) * drhs
+                lhs.backprop_rec(grad * rhs.eval_cb(&null_callback), callback);
+                rhs.backprop_rec(grad * lhs.eval_cb(&null_callback), callback);
             }
             Div(lhs, rhs) => {
-                let dlhs = lhs.backprop_rec(1. / rhs.eval_cb(&null_callback), callback);
-                let drhs = rhs.backprop_rec(lhs.eval_cb(&null_callback), callback);
-                if drhs == 0. {
-                    dlhs / rhs.eval_cb(&null_callback)
-                } else {
-                    dlhs / rhs.eval_cb(&null_callback) + lhs.eval_cb(&null_callback) / drhs
-                }
+                let erhs = rhs.eval_cb(&null_callback);
+                let elhs = lhs.eval_cb(&null_callback);
+                lhs.backprop_rec(grad / erhs, callback);
+                rhs.backprop_rec(-grad * elhs / erhs / erhs, callback);
             }
             Neg(term) => term.backprop_rec(-grad, callback),
-            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => term.backprop_rec(g(grad), callback),
-        };
-        grad
+            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+                let val = term.eval_cb(&null_callback);
+                term.backprop_rec(grad * g(val), callback);
+            }
+        }
     }
 
     /// The entry point to backpropagation

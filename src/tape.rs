@@ -300,8 +300,8 @@ fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) {
         Div(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
             backprop_rec(nodes, lhs, grad / erhs);
+            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
         }
         Neg(term) => backprop_rec(nodes, term, -grad),
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
