@@ -7,7 +7,9 @@ An experimental implementation of reverse-mode, define-and-run autograd in Rust
 Neural networks heavily rely on differentiation.
 In a previous project of mine [DeepRender](https://github.com/msakuta/DeepRender), I implemented derivatives of each activation function by hand, but practical deep learning libraries usually comes with automatic differentiation (autograd).
 
-Inspired by [this video](https://youtu.be/VMj-3S1tku0), it seems not too difficult to build such a library myself, so I gave it a try.
+Inspired by [Andrej Karpathy's video](https://youtu.be/VMj-3S1tku0), it seems not too difficult to build such a library myself, so I gave it a try.
+
+**NOTE**: This project is experimental research project. If you are looking for a serious autograd library, check out [rust-autograd](https://github.com/raskr/rust-autograd).
 
 ## Usage
 
