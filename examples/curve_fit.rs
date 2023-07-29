@@ -96,7 +96,8 @@ fn main() {
     model.x.set(0.).unwrap();
     model.gaussian.eval();
     model.gaussian.backprop();
-    model.gaussian.dot(&mut std::io::stdout()).unwrap();
+    let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
+    model.gaussian.dot(&mut dotfile, false).unwrap();
 }
 
 struct Model<'a> {

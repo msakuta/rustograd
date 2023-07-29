@@ -229,4 +229,11 @@ Here autograd comes to rescue! With autograd, all you need is to build the expre
     let loss = diff * diff;
 ```
 
+Below is an animation of gradient descent in action, using gradient calculated by autograd.
+
 ![curve_fit](images/curve_fit.gif)
+
+The computational graph is like below.
+
+![curve_fit_graph](images/curve_fit_graph.svg)
+

@@ -16,7 +16,7 @@ fn main() {
     }
     a.set(0.).unwrap();
     all.backprop();
-    all.dot(&mut std::io::stdout()).unwrap();
+    all.dot(&mut std::io::stdout(), false).unwrap();
 }
 
 fn build_model(tape: &Tape) -> (TapeTerm, TapeTerm) {

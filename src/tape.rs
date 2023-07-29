@@ -194,7 +194,9 @@ impl<'a> TapeTerm<'a> {
     }
 
     /// Write graphviz dot file to the given writer.
-    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    ///
+    /// Enabling `show_values` renders data values and gradients for each node.
+    pub fn dot(&self, writer: &mut impl Write, show_values: bool) -> std::io::Result<()> {
         let nodes = self.tape.nodes.borrow();
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
@@ -205,11 +207,19 @@ impl<'a> TapeTerm<'a> {
             } else {
                 ""
             };
-            writeln!(
-                writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
-                id, term.name, term.data, term.grad
-            )?;
+            if show_values {
+                writeln!(
+                    writer,
+                    "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
+                    id, term.name, term.data, term.grad
+                )?;
+            } else {
+                writeln!(
+                    writer,
+                    "a{} [label=\"{}\" shape=rect {color}];",
+                    id, term.name
+                )?;
+            }
         }
         use TapeValue::*;
         for (id, term) in nodes.iter().enumerate() {
