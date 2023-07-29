@@ -186,3 +186,47 @@ Its derivative shall have a name `sin_derive`, like below.
 fn sin(x: f64) -> f64 { x.sin() }
 fn sin_derive(x: f64) -> f64 { x.cos() }
 ```
+
+## Example applications
+
+### Curve fitting
+
+[examples/curve_fit.rs](examples/curve_fit.rs)
+
+Let's say, we have a set of measured data that supposed to contain some Gaussian distribution.
+We don't know the position and spread (standard deviation) of the Gaussian.
+We can use least squares fitting to determine the parameters $\mu, \sigma, s$ in the expression below.
+
+$$
+f(x; \mu, \sigma, s) = s \exp \left(-\frac{(x - \mu)^2}{\sigma^2} \right)
+$$
+
+To apply least squares fitting, we define the loss function like below (denoting $x_i, y_i$ as the $i$th sample).
+
+$$
+L = \sum_i (f(x_i) - y_i)^2
+$$
+
+We could calculate the gradient by taking partial derivates of the loss function with respect to each parameter and descend by some descend rate $\alpha$, but it is very tedious to calculate by hand (I mean, it's not too bad with this level, but if you try to expand this method, it quickly becomes unmanageable).
+
+$$
+\mu \leftarrow \mu - \alpha \frac{\partial L}{\partial \mu} \\
+\sigma \leftarrow \sigma - \alpha \frac{\partial L}{\partial \sigma} \\
+s \leftarrow s - \alpha \frac{\partial L}{\partial s}
+$$
+
+Here autograd comes to rescue! With autograd, all you need is to build the expression like below and call `loss.backprop()`.
+
+```rust
+    let x = tape.term("x", 0.);
+    let mu = tape.term("mu", 0.);
+    let sigma = tape.term("sigma", 1.);
+    let scale = tape.term("scale", 1.);
+    let x_mu = x - mu;
+    let gaussian = scale * (-(x_mu * x_mu) / sigma / sigma).apply("exp", f64::exp, f64::exp);
+    let sample_y = tape.term("y", 0.);
+    let diff = gaussian - sample_y;
+    let loss = diff * diff;
+```
+
+![curve_fit](images/curve_fit.gif)
