@@ -94,35 +94,67 @@ impl Tape {
 impl<'a> std::ops::Add for TapeTerm<'a> {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        self.tape.term0(TapeValue::Add(self.idx, rhs.idx))
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            format!(
+                "({} + {})",
+                nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
+            )
+        };
+        self.tape.term_name(name, TapeValue::Add(self.idx, rhs.idx))
     }
 }
 
 impl<'a> std::ops::Sub for TapeTerm<'a> {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
-        self.tape.term0(TapeValue::Sub(self.idx, rhs.idx))
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            format!(
+                "({} - {})",
+                nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
+            )
+        };
+        self.tape.term_name(name, TapeValue::Sub(self.idx, rhs.idx))
     }
 }
 
 impl<'a> std::ops::Mul for TapeTerm<'a> {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        self.tape.term0(TapeValue::Mul(self.idx, rhs.idx))
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            format!(
+                "{} * {}",
+                nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
+            )
+        };
+        self.tape.term_name(name, TapeValue::Mul(self.idx, rhs.idx))
     }
 }
 
 impl<'a> std::ops::Div for TapeTerm<'a> {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
-        self.tape.term0(TapeValue::Div(self.idx, rhs.idx))
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            format!(
+                "{} / {}",
+                nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
+            )
+        };
+        self.tape.term_name(name, TapeValue::Div(self.idx, rhs.idx))
     }
 }
 
 impl<'a> std::ops::Neg for TapeTerm<'a> {
     type Output = Self;
     fn neg(self) -> Self::Output {
-        self.tape.term0(TapeValue::Neg(self.idx))
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            format!("-{}", nodes[self.idx as usize].name)
+        };
+        self.tape.term_name(name, TapeValue::Neg(self.idx))
     }
 }
 
