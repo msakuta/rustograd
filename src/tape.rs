@@ -60,21 +60,6 @@ impl Tape {
         }
     }
 
-    fn term0<'a>(&'a self, value: TapeValue) -> TapeTerm<'a> {
-        let mut nodes = self.nodes.borrow_mut();
-        let idx = nodes.len();
-        nodes.push(TapeNode {
-            name: format!("a{idx}"),
-            value,
-            data: 0.,
-            grad: 0.,
-        });
-        TapeTerm {
-            tape: self,
-            idx: idx as u32,
-        }
-    }
-
     fn term_name<'a>(&'a self, name: impl Into<String>, value: TapeValue) -> TapeTerm<'a> {
         let mut nodes = self.nodes.borrow_mut();
         let idx = nodes.len();
