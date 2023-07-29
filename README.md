@@ -189,10 +189,12 @@ fn sin_derive(x: f64) -> f64 { x.cos() }
 
 ## Example applications
 
+In the following examples, I use `TapeTerm` because it is expected to be the most efficient one in complex expressions.
+
 ### Curve fitting
 
 [examples/curve_fit.rs](examples/curve_fit.rs)
-
+g
 Let's say, we have a set of measured data that supposed to contain some Gaussian distribution.
 We don't know the position and spread (standard deviation) of the Gaussian.
 We can use least squares fitting to determine the parameters $\mu, \sigma, s$ in the expression below.
@@ -210,9 +212,11 @@ $$
 We could calculate the gradient by taking partial derivates of the loss function with respect to each parameter and descend by some descend rate $\alpha$, but it is very tedious to calculate by hand (I mean, it's not too bad with this level, but if you try to expand this method, it quickly becomes unmanageable).
 
 $$
-\mu \leftarrow \mu - \alpha \frac{\partial L}{\partial \mu} \\
-\sigma \leftarrow \sigma - \alpha \frac{\partial L}{\partial \sigma} \\
-s \leftarrow s - \alpha \frac{\partial L}{\partial s}
+\begin{align*}
+\mu &\leftarrow \mu - \alpha \frac{\partial L}{\partial \mu} \\
+\sigma &\leftarrow \sigma - \alpha \frac{\partial L}{\partial \sigma} \\
+s &\leftarrow s - \alpha \frac{\partial L}{\partial s}
+\end{align*}
 $$
 
 Here autograd comes to rescue! With autograd, all you need is to build the expression like below and call `loss.backprop()`.
@@ -237,3 +241,61 @@ The computational graph is like below.
 
 ![curve_fit_graph](images/curve_fit_graph.svg)
 
+It may not seem so impressive since you can estimate the parameters directly from sample mean and standard deviation like below if the distribution is a Gaussian, but it gets more interesting from the next section.
+
+$$
+\begin{align*}
+\mu &= \frac{1}{N}\sum_i x \\
+\sigma &= \sqrt{\frac{1}{N - 1}\sum_i (x - \mu)^2}
+\end{align*}
+$$
+
+
+### Peak separation
+
+[examples/peak_separation.rs](examples/peak_separation.rs)
+
+Another important application often comes up with measurement is peak separation.
+It is similar to curve fitting, but the main goal is to identify each parameter from a mixed signal of Gaussian distributions.
+
+$$
+f(x; \mathbf{\mu}, \mathbf{\sigma}, \mathbf{s}) = \sum_k s_k \exp \left(-\frac{(x - \mu_k)^2}{\sigma_k^2} \right)
+$$
+
+The model is quite similar to the previous example, but there are 2 Gaussian distributions, which shares the structure, so I used a lambda to factor it.
+
+```rust
+    let x = tape.term("x", 0.);
+
+    let gaussian = |i: i32| {
+        let mu = tape.term(format!("mu{i}"), 0.);
+        let sigma = tape.term(format!("sigma{i}"), 1.);
+        let scale = tape.term(format!("scale{i}"), 1.);
+        let x_mu = x - mu;
+        let g = scale * (-(x_mu * x_mu) / sigma / sigma).apply("exp", f64::exp, f64::exp);
+        (mu, sigma, scale, g)
+    };
+
+    let (mu0, sigma0, scale0, g0) = gaussian(0);
+    let (mu1, sigma1, scale1, g1) = gaussian(1);
+    let y = g0 + g1;
+
+    let sample_y = tape.term("y", 0.);
+    let diff = y - sample_y;
+    let loss = diff * diff;
+```
+
+
+![peak_separation](images/peak_separation.gif)
+
+At this point, the computation graph becomes so complicated that I won't even bother calculating by hand. However, autograd keeps information of factored values and do not repeat redundant calculation.
+
+![peak_separation_graph](images/peak_separation_graph.svg)
+
+There is one notable thing about this graph.
+The variable $x$ is shared among 2 Gaussians, so it appears as a node with 2 children.
+This kind of structure in the computational graph is automatically captured with autograd.
+
+Also there are 2 arrows from `(x - mu0)` to `(x - mu0) * (x - mu0)` because we repeat the same expression to calculate square.
+
+![peak_separation_graph_zoomed](images/peak_separation_graph_zoomed.png)
