@@ -31,7 +31,12 @@ fn main() {
     const INIT_SIGMA: f64 = 1.;
     const INIT_SCALE: f64 = 1.;
 
-    let optimize = |mu0: &mut f64, sigma0: &mut f64, scale0: &mut f64, mu1: &mut f64, sigma1: &mut f64, scale1: &mut f64| {
+    let optimize = |mu0: &mut f64,
+                    sigma0: &mut f64,
+                    scale0: &mut f64,
+                    mu1: &mut f64,
+                    sigma1: &mut f64,
+                    scale1: &mut f64| {
         model.mu0.set(*mu0).unwrap();
         model.sigma0.set(*sigma0).unwrap();
         model.scale0.set(*scale0).unwrap();
@@ -60,7 +65,14 @@ fn main() {
     let mut scale1 = INIT_SCALE;
     let mut history: Vec<[f64; 7]> = vec![];
     for i in 0..500 {
-        optimize(&mut mu0, &mut sigma0, &mut scale0, &mut mu1, &mut sigma1, &mut scale1);
+        optimize(
+            &mut mu0,
+            &mut sigma0,
+            &mut scale0,
+            &mut mu1,
+            &mut sigma1,
+            &mut scale1,
+        );
         let t = i as f64;
         if history
             .last()
@@ -105,7 +117,9 @@ fn main() {
                 model.scale1.set(scale1).unwrap();
                 (model.g0.eval(), model.g1.eval(), model.y.eval())
             })
-            .fold("".to_string(), |acc, (g0, g1, y)| acc + &format!(", {g0}, {g1}, {y}"));
+            .fold("".to_string(), |acc, (g0, g1, y)| {
+                acc + &format!(", {g0}, {g1}, {y}")
+            });
         writeln!(
             file,
             "{xval}, {value}, {init_value}, {truth_y}{hist_string}"

@@ -194,7 +194,7 @@ In the following examples, I use `TapeTerm` because it is expected to be the mos
 ### Curve fitting
 
 [examples/curve_fit.rs](examples/curve_fit.rs)
-g
+
 Let's say, we have a set of measured data that supposed to contain some Gaussian distribution.
 We don't know the position and spread (standard deviation) of the Gaussian.
 We can use least squares fitting to determine the parameters $\mu, \sigma, s$ in the expression below.
