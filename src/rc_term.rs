@@ -1,6 +1,5 @@
 use std::{
     cell::Cell,
-    collections::BTreeMap,
     io::Write,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
@@ -29,12 +28,12 @@ impl TermInt {
         use TermInt::*;
         match self {
             Value(val) => val.get(),
-            Add(lhs, rhs) => lhs.eval_cb(callback) + rhs.eval_cb(callback),
-            Sub(lhs, rhs) => lhs.eval_cb(callback) - rhs.eval_cb(callback),
-            Mul(lhs, rhs) => lhs.eval_cb(callback) * rhs.eval_cb(callback),
-            Div(lhs, rhs) => lhs.eval_cb(callback) / rhs.eval_cb(callback),
-            Neg(term) => -term.eval_cb(callback),
-            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_cb(callback)),
+            Add(lhs, rhs) => lhs.eval_int(callback) + rhs.eval_int(callback),
+            Sub(lhs, rhs) => lhs.eval_int(callback) - rhs.eval_int(callback),
+            Mul(lhs, rhs) => lhs.eval_int(callback) * rhs.eval_int(callback),
+            Div(lhs, rhs) => lhs.eval_int(callback) / rhs.eval_int(callback),
+            Neg(term) => -term.eval_int(callback),
+            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_int(callback)),
         }
     }
 }
@@ -257,18 +256,18 @@ impl RcTerm {
                 rhs.backprop_rec(-grad, callback);
             }
             Mul(lhs, rhs) => {
-                lhs.backprop_rec(grad * rhs.eval_cb(&null_callback), callback);
-                rhs.backprop_rec(grad * lhs.eval_cb(&null_callback), callback);
+                lhs.backprop_rec(grad * rhs.eval_int(&null_callback), callback);
+                rhs.backprop_rec(grad * lhs.eval_int(&null_callback), callback);
             }
             Div(lhs, rhs) => {
-                let erhs = rhs.eval_cb(&null_callback);
-                let elhs = lhs.eval_cb(&null_callback);
+                let erhs = rhs.eval_int(&null_callback);
+                let elhs = lhs.eval_int(&null_callback);
                 lhs.backprop_rec(grad / erhs, callback);
                 rhs.backprop_rec(-grad * elhs / erhs / erhs, callback);
             }
             Neg(term) => term.backprop_rec(-grad, callback),
             UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
-                let val = term.eval_cb(&null_callback);
+                let val = term.eval_int(&null_callback);
                 term.backprop_rec(grad * g(val), callback);
             }
         }
@@ -287,11 +286,21 @@ impl RcTerm {
 
     /// Evaluate value with possibly updated value by [`set`]
     pub fn eval(&self) -> f64 {
-        self.eval_cb(&|_| ())
+        self.clear();
+        self.eval_int(&|_| ())
     }
 
     /// Evaluate value with a callback for each visited node
     pub fn eval_cb(&self, callback: &impl Fn(f64)) -> f64 {
+        self.clear();
+        self.eval_int(callback)
+    }
+
+    /// Internal function for recursive calls
+    fn eval_int(&self, callback: &impl Fn(f64)) -> f64 {
+        if let Some(data) = self.0.data.get() {
+            return data;
+        }
         let val = self.0.value.eval(callback);
         self.0.data.set(Some(val));
         callback(val);
