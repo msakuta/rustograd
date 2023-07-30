@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies]
 rustograd-macro = { path = "rustograd-macro", optional = true }
 
+[dev-dependencies]
+rustograd-macro = { path = "rustograd-macro" }
+
 [features]
 default = []
 macro = ["dep:rustograd-macro"]

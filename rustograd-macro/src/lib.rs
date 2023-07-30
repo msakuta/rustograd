@@ -94,6 +94,17 @@ fn traverse_expr(input: &Expr, terms: &mut Vec<TokenStream2>) -> Option<Ident> {
                 None
             }
         }
+        Expr::Unary(ex) => {
+            let term = traverse_expr(&ex.expr, terms);
+            if matches!(ex.op, syn::UnOp::Neg(_)) {
+                let name = Ident::new(&var_name(terms), ex.span());
+                let ts = quote! { let #name = -&#term; };
+                terms.push(ts);
+                Some(name)
+            } else {
+                None
+            }
+        }
         Expr::Paren(ex) => traverse_expr(&ex.expr, terms),
         Expr::Lit(lit) => {
             let name = format_term(&lit, terms);

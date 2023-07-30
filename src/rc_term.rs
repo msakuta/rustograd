@@ -132,10 +132,13 @@ impl RcTerm {
 
     /// Write graphviz dot file to the given writer.
     pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
-        let mut map = BTreeMap::new();
+        let mut map = Vec::new();
         self.accum(&mut map);
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
-        for (id, (term, _)) in &map {
+        for entry in &map {
+            let DotEntry {
+                id, payload: term, ..
+            } = entry;
             let color = if term.grad.get().is_some() {
                 "style=filled fillcolor=\"#ffff7f\""
             } else if term.data.get().is_some() {
@@ -158,7 +161,8 @@ impl RcTerm {
                     .unwrap_or_else(|| "None".into())
             )?;
         }
-        for (id, (_, parents)) in &map {
+        for entry in &map {
+            let DotEntry { id, parents, .. } = entry;
             for pid in parents {
                 writeln!(writer, "a{} -> a{};", pid, *id)?;
             }
@@ -172,7 +176,7 @@ impl RcTerm {
         payload as *const _ as usize
     }
 
-    fn accum<'a>(&'a self, map: &mut BTreeMap<usize, (&'a TermPayload, Vec<usize>)>) {
+    fn accum<'a>(&'a self, map: &mut Vec<DotEntry<'a>>) {
         use TermInt::*;
         let parents = match &self.0.value {
             Value(_) => vec![],
@@ -186,7 +190,11 @@ impl RcTerm {
                 vec![term.id()]
             }
         };
-        map.insert(self.id(), (&self.0, parents));
+        map.push(DotEntry {
+            id: self.id(),
+            parents,
+            payload: &self.0,
+        });
     }
 
     /// One-time derivation. Does not update internal gradient values.
@@ -332,4 +340,10 @@ impl RcTerm {
             Err("Cannot set value to non-leaf nodes".into())
         }
     }
+}
+
+struct DotEntry<'a> {
+    id: usize,
+    payload: &'a TermPayload,
+    parents: Vec<usize>,
 }
