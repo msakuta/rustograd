@@ -9,7 +9,7 @@ pub struct Tape {
 }
 
 #[derive(Clone, Debug)]
-struct TapeNode {
+pub struct TapeNode {
     name: String,
     value: TapeValue,
     data: f64,
@@ -188,9 +188,18 @@ impl<'a> TapeTerm<'a> {
     }
 
     pub fn backprop(&self) {
+        let none: Option<&fn(Vec<TapeNode>)> = None;
+        self.backprop_common(none);
+    }
+
+    pub fn backprop_cb(&self, callback: &impl Fn(Vec<TapeNode>)) {
+        self.backprop_common(Some(callback));
+    }
+
+    fn backprop_common(&self, callback: Option<&impl Fn(Vec<TapeNode>)>) {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        backprop_rec(&mut nodes, self.idx, 1.);
+        backprop_rec(&mut nodes, self.idx, 1., callback);
     }
 
     /// Write graphviz dot file to the given writer.
@@ -198,6 +207,15 @@ impl<'a> TapeTerm<'a> {
     /// Enabling `show_values` renders data values and gradients for each node.
     pub fn dot(&self, writer: &mut impl Write, show_values: bool) -> std::io::Result<()> {
         let nodes = self.tape.nodes.borrow();
+        self.dot_borrowed(&nodes, writer, show_values)
+    }
+
+    pub fn dot_borrowed(
+        &self,
+        nodes: &[TapeNode],
+        writer: &mut impl Write,
+        show_values: bool,
+    ) -> std::io::Result<()> {
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
             let color = if term.grad != 0. {
@@ -305,35 +323,43 @@ fn clear_grad(nodes: &mut [TapeNode]) {
 }
 
 /// Assign gradient to all nodes
-fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) {
+fn backprop_rec(
+    nodes: &mut [TapeNode],
+    idx: u32,
+    grad: f64,
+    callback: Option<&impl Fn(Vec<TapeNode>)>,
+) {
     use TapeValue::*;
     nodes[idx as usize].grad += grad;
+    if let Some(callback) = callback {
+        callback(nodes.to_vec());
+    }
     match nodes[idx as usize].value {
         Value(_) => (),
         Add(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad);
-            backprop_rec(nodes, rhs, grad);
+            backprop_rec(nodes, lhs, grad, callback);
+            backprop_rec(nodes, rhs, grad, callback);
         }
         Sub(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad);
-            backprop_rec(nodes, rhs, -grad);
+            backprop_rec(nodes, lhs, grad, callback);
+            backprop_rec(nodes, rhs, -grad, callback);
         }
         Mul(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad * erhs);
-            backprop_rec(nodes, rhs, grad * elhs);
+            backprop_rec(nodes, lhs, grad * erhs, callback);
+            backprop_rec(nodes, rhs, grad * elhs, callback);
         }
         Div(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad / erhs);
-            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
+            backprop_rec(nodes, lhs, grad / erhs, callback);
+            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs, callback);
         }
-        Neg(term) => backprop_rec(nodes, term, -grad),
+        Neg(term) => backprop_rec(nodes, term, -grad, callback),
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
             let val = value(nodes, term);
-            backprop_rec(nodes, term, grad * g(val))
+            backprop_rec(nodes, term, grad * g(val), callback)
         }
     }
 }

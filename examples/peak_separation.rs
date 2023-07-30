@@ -1,6 +1,6 @@
 //! Peak separation using least squares fitting with gradient descent.
 
-use rustograd::{Tape, TapeTerm};
+use rustograd::{Tape, TapeNode, TapeTerm};
 
 use std::io::Write;
 
@@ -105,16 +105,29 @@ fn main() {
                 model.scale1.set(scale1).unwrap();
                 (model.g0.eval(), model.g1.eval(), model.y.eval())
             })
-            .fold("".to_string(), |acc, (g0, g1, y)| acc + &format!(", {g0}, {g1}, {y}"));
+            .fold("".to_string(), |acc, (g0, g1, y)| {
+                acc + &format!(", {g0}, {g1}, {y}")
+            });
         writeln!(
             file,
             "{xval}, {value}, {init_value}, {truth_y}{hist_string}"
         )
         .unwrap();
     }
+
+    let counter = std::cell::Cell::new(0);
+    let callback = |nodes: Vec<TapeNode>| {
+        let i = counter.get();
+        let fname = format!("dot{i}.dot");
+        println!("Outputting {fname}...");
+        let mut file = std::io::BufWriter::new(std::fs::File::create(fname).unwrap());
+        model.loss.dot_borrowed(&nodes, &mut file, false).unwrap();
+        counter.set(i + 1);
+    };
+
     model.x.set(0.).unwrap();
     model.y.eval();
-    model.y.backprop();
+    model.y.backprop_cb(&callback);
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
     model.y.dot(&mut dotfile, false).unwrap();
 }
