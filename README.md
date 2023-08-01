@@ -299,3 +299,18 @@ This kind of structure in the computational graph is automatically captured with
 Also there are 2 arrows from `(x - mu0)` to `(x - mu0) * (x - mu0)` because we repeat the same expression to calculate square.
 
 ![peak_separation_graph_zoomed](images/peak_separation_graph_zoomed.png)
+
+
+## Performance investigation
+
+We can measure the performance of each type of terms.
+
+We tested with `RcTerm`, `TapeTerm<f64>` and `TapeTerm<MyTensor>`, where
+`MyTensor` is custom implementation of 1-D vector.
+
+The plot below shows comparison of each implementation in [rc_curve_fit](examples/rc_curve_fit.rs), [tape_curve_fit](examples/tape_curve_fit.rs) and [tape_tensor_curve_fit](examples/tape_tensor_curve_fit.rs).
+As you can see, `TapeTerm<f64>` is faster than `RcTerm` and `TapeTerm<MyTensor>` is (marginally) faster than `TapeTerm<f64>`.
+It indicates that even though `MyTensor` uses heap memory allocation, it is still faster to aggregate operation in an expression, rather than scanning the scaler value and evaluating each of them.
+Next step is to investigate if using a memory arena for the contents of the tensor helps further.
+
+![term_perf](images/term_perf.png)
