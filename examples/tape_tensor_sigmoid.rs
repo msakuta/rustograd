@@ -1,11 +1,12 @@
-use std::fmt::Display;
+use rustograd::{Tape, TapeTerm, Tensor};
 
-use rustograd::{Tape, Tensor};
-
-const ELEMS: usize = 10;
+use std::{fmt::Display, io::Write, ops::Range};
 
 #[derive(Clone)]
 struct MyTensor(Vec<f64>);
+
+const XRANGE: Range<i32> = -40..40;
+const ELEMS: usize = (XRANGE.end - XRANGE.start) as usize;
 
 impl Display for MyTensor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -100,24 +101,41 @@ impl Tensor for MyTensor {
 
 fn main() {
     let tape = Tape::<MyTensor>::new();
-    let a = tape.term("a", MyTensor(vec![123.; ELEMS]));
-    let b = tape.term("b", MyTensor(vec![321.; ELEMS]));
-    let c = tape.term("c", MyTensor(vec![42.; ELEMS]));
-    let ab = a + b;
-    let abc = ab * c;
-    println!("a + b = {}", ab.eval());
-    println!("(a + b) * c = {}", abc.eval());
-    let ab_a = ab.derive(&a);
-    println!("d(a + b) / da = {}", ab_a);
-    let abc_a = abc.derive(&a);
-    println!("d((a + b) * c) / da = {}", abc_a);
-    let abc_b = abc.derive(&b);
-    println!("d((a + b) * c) / db = {}", abc_b);
-    let abc_c = abc.derive(&c);
-    println!("d((a + b) * c) / dc = {}", abc_c);
+    let (x, all) = build_model(&tape);
+    let mut file = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
+    let xs = MyTensor(
+        XRANGE
+            .map(|i| i as f64 / 20. * std::f64::consts::PI)
+            .collect(),
+    );
+    x.set(xs).unwrap();
+    let value = all.eval();
+    all.backprop();
+    let derive = all.derive(&x);
+    let grad = x.grad();
+    writeln!(file, "x, f(x), $df/dx$ (derive), $df/dx$ (backprop)").unwrap();
+    for (((xval, &value), derive), grad) in XRANGE
+        .zip(value.0.iter())
+        .zip(derive.0.iter())
+        .zip(grad.0.iter())
+    {
+        writeln!(file, "{xval}, {value}, {derive}, {grad}").unwrap();
+    }
+    x.set(MyTensor::default()).unwrap();
+    all.eval();
+    all.backprop();
+    all.dot(&mut std::io::stdout(), false).unwrap();
+}
 
-    let d = tape.term("d", MyTensor(vec![2.; ELEMS]));
-    let abcd = abc / d;
-    let abcd_c = abcd.derive(&c);
-    println!("d((a + b) * c / d) / dc = {}", abcd_c);
+fn my_exp(x: MyTensor) -> MyTensor {
+    MyTensor(x.0.into_iter().map(|x| x.exp()).collect())
+}
+
+fn build_model(tape: &Tape<MyTensor>) -> (TapeTerm<MyTensor>, TapeTerm<MyTensor>) {
+    let x = tape.term("x", MyTensor::default());
+    let exp_x = (-x).apply("exp", my_exp, my_exp);
+    let one = tape.term("1", MyTensor::one());
+    let one2 = tape.term("1", MyTensor::one());
+    let all = one / (one2 + exp_x);
+    (x, all)
 }

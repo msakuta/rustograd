@@ -1,4 +1,4 @@
-use rustograd::{Tape, TapeTerm};
+use rustograd::Tape;
 
 fn main() {
     let tape = Tape::new();
