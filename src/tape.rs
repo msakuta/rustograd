@@ -1,58 +1,94 @@
 //! Implementation of shared memory arena for the terms, aka a tape.
 //! See https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
-use std::{cell::RefCell, io::Write};
+use std::{cell::RefCell, fmt::Display, io::Write};
+
+pub trait Tensor:
+    std::ops::Add<Self, Output = Self>
+    + std::ops::AddAssign<Self>
+    + std::ops::Sub<Self, Output = Self>
+    + std::ops::Mul<Self, Output = Self>
+    + std::ops::Div<Self, Output = Self>
+    + std::ops::Neg<Output = Self>
+    + Sized
+    + Default
+    + Display
+    + Clone
+{
+    fn one() -> Self;
+    fn is_zero(&self) -> bool;
+}
+
+impl Tensor for f64 {
+    fn one() -> Self {
+        1.
+    }
+
+    fn is_zero(&self) -> bool {
+        *self == 0.
+    }
+}
 
 #[derive(Default, Debug)]
-pub struct Tape {
-    nodes: RefCell<Vec<TapeNode>>,
+pub struct Tape<T: Default = f64> {
+    nodes: RefCell<Vec<TapeNode<T>>>,
 }
 
 #[derive(Clone, Debug)]
-struct TapeNode {
+struct TapeNode<T> {
     name: String,
-    value: TapeValue,
-    data: f64,
-    grad: f64,
+    value: TapeValue<T>,
+    data: T,
+    grad: T,
 }
 
 #[derive(Clone, Debug)]
-struct UnaryFnPayload {
+struct UnaryFnPayload<T> {
     term: u32,
-    f: fn(f64) -> f64,
-    grad: fn(f64) -> f64,
+    f: fn(T) -> T,
+    grad: fn(T) -> T,
 }
 
 #[derive(Clone, Debug)]
-enum TapeValue {
-    Value(f64),
+enum TapeValue<T> {
+    Value(T),
     Add(u32, u32),
     Sub(u32, u32),
     Mul(u32, u32),
     Div(u32, u32),
     Neg(u32),
-    UnaryFn(UnaryFnPayload),
+    UnaryFn(UnaryFnPayload<T>),
 }
 
-#[derive(Copy, Clone)]
-pub struct TapeTerm<'a> {
-    tape: &'a Tape,
+pub struct TapeTerm<'a, T: Default = f64> {
+    tape: &'a Tape<T>,
     idx: u32,
 }
 
-impl Tape {
+// derive macro doesn't work for generics
+impl<'a, T: Default> Clone for TapeTerm<'a, T> {
+    fn clone(&self) -> Self {
+        Self {
+            tape: self.tape,
+            idx: self.idx,
+        }
+    }
+}
+impl<'a, T: Default> Copy for TapeTerm<'a, T> {}
+
+impl<T: Tensor> Tape<T> {
     pub fn new() -> Self {
         Self::default()
     }
 
-    pub fn term<'a>(&'a self, name: impl Into<String>, init: f64) -> TapeTerm<'a> {
+    pub fn term<'a>(&'a self, name: impl Into<String>, init: T) -> TapeTerm<'a, T> {
         let mut nodes = self.nodes.borrow_mut();
         let idx = nodes.len();
         nodes.push(TapeNode {
             name: name.into(),
             value: TapeValue::Value(init),
-            data: 0.,
-            grad: 0.,
+            data: T::default(),
+            grad: T::default(),
         });
         TapeTerm {
             tape: self,
@@ -60,14 +96,14 @@ impl Tape {
         }
     }
 
-    fn term_name<'a>(&'a self, name: impl Into<String>, value: TapeValue) -> TapeTerm<'a> {
+    fn term_name<'a>(&'a self, name: impl Into<String>, value: TapeValue<T>) -> TapeTerm<'a, T> {
         let mut nodes = self.nodes.borrow_mut();
         let idx = nodes.len();
         nodes.push(TapeNode {
             name: name.into(),
             value,
-            data: 0.,
-            grad: 0.,
+            data: T::default(),
+            grad: T::default(),
         });
         TapeTerm {
             tape: self,
@@ -76,7 +112,7 @@ impl Tape {
     }
 }
 
-impl<'a> std::ops::Add for TapeTerm<'a> {
+impl<'a, T: Tensor> std::ops::Add for TapeTerm<'a, T> {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
         let name = {
@@ -90,7 +126,7 @@ impl<'a> std::ops::Add for TapeTerm<'a> {
     }
 }
 
-impl<'a> std::ops::Sub for TapeTerm<'a> {
+impl<'a, T: Tensor> std::ops::Sub for TapeTerm<'a, T> {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
         let name = {
@@ -104,7 +140,7 @@ impl<'a> std::ops::Sub for TapeTerm<'a> {
     }
 }
 
-impl<'a> std::ops::Mul for TapeTerm<'a> {
+impl<'a, T: Tensor> std::ops::Mul for TapeTerm<'a, T> {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
         let name = {
@@ -118,7 +154,7 @@ impl<'a> std::ops::Mul for TapeTerm<'a> {
     }
 }
 
-impl<'a> std::ops::Div for TapeTerm<'a> {
+impl<'a, T: Tensor> std::ops::Div for TapeTerm<'a, T> {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
         let name = {
@@ -132,7 +168,7 @@ impl<'a> std::ops::Div for TapeTerm<'a> {
     }
 }
 
-impl<'a> std::ops::Neg for TapeTerm<'a> {
+impl<'a, T: Tensor> std::ops::Neg for TapeTerm<'a, T> {
     type Output = Self;
     fn neg(self) -> Self::Output {
         let name = {
@@ -143,16 +179,16 @@ impl<'a> std::ops::Neg for TapeTerm<'a> {
     }
 }
 
-impl<'a> TapeTerm<'a> {
-    pub fn eval(&self) -> f64 {
+impl<'a, T: Tensor> TapeTerm<'a, T> {
+    pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         eval(&mut nodes, self.idx)
     }
 
     /// One-time derivation. Does not update internal gradient values.
-    pub fn derive(&self, var: &Self) -> f64 {
+    pub fn derive(&self, var: &Self) -> T {
         if self.idx == var.idx {
-            1.
+            T::one()
         } else {
             let mut nodes = self.tape.nodes.borrow_mut();
             derive(&mut nodes, self.idx, var.idx)
@@ -162,8 +198,8 @@ impl<'a> TapeTerm<'a> {
     pub fn apply(
         &self,
         name: &(impl AsRef<str> + ?Sized),
-        f: fn(f64) -> f64,
-        grad: fn(f64) -> f64,
+        f: fn(T) -> T,
+        grad: fn(T) -> T,
     ) -> Self {
         let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
         let name = format!("{}({})", name.as_ref(), self_name);
@@ -177,7 +213,7 @@ impl<'a> TapeTerm<'a> {
         )
     }
 
-    pub fn set(&self, value: f64) -> Result<(), ()> {
+    pub fn set(&self, value: T) -> Result<(), ()> {
         let mut nodes = self.tape.nodes.borrow_mut();
         let node = nodes.get_mut(self.idx as usize).ok_or_else(|| ())?;
         match &mut node.value {
@@ -190,7 +226,7 @@ impl<'a> TapeTerm<'a> {
     pub fn backprop(&self) {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        backprop_rec(&mut nodes, self.idx, 1.);
+        backprop_rec(&mut nodes, self.idx, T::one());
     }
 
     /// Write graphviz dot file to the given writer.
@@ -200,9 +236,9 @@ impl<'a> TapeTerm<'a> {
         let nodes = self.tape.nodes.borrow();
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
-            let color = if term.grad != 0. {
+            let color = if !term.grad.is_zero() {
                 "style=filled fillcolor=\"#ffff7f\""
-            } else if term.data != 0. {
+            } else if !term.data.is_zero() {
                 "style=filled fillcolor=\"#7fff7f\""
             } else {
                 ""
@@ -240,40 +276,40 @@ impl<'a> TapeTerm<'a> {
         Ok(())
     }
 
-    pub fn grad(&self) -> f64 {
-        self.tape.nodes.borrow()[self.idx as usize].grad
+    pub fn grad(&self) -> T {
+        self.tape.nodes.borrow()[self.idx as usize].grad.clone()
     }
 }
 
-fn eval(nodes: &mut [TapeNode], idx: u32) -> f64 {
+fn eval<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32) -> T {
     use TapeValue::*;
-    let data = match nodes[idx as usize].value {
-        Value(val) => val,
-        Add(lhs, rhs) => eval(nodes, lhs) + eval(nodes, rhs),
-        Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
-        Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
-        Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
-        Neg(term) => -eval(nodes, term),
-        UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
+    let data = match &nodes[idx as usize].value {
+        Value(val) => val.clone(),
+        &Add(lhs, rhs) => eval(nodes, lhs) + eval(nodes, rhs),
+        &Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
+        &Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
+        &Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
+        &Neg(term) => -eval(nodes, term),
+        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
     };
-    nodes[idx as usize].data = data;
+    nodes[idx as usize].data = data.clone();
     data
 }
 
-fn value(nodes: &[TapeNode], idx: u32) -> f64 {
-    nodes[idx as usize].data
+fn value<T: Clone>(nodes: &[TapeNode<T>], idx: u32) -> T {
+    nodes[idx as usize].data.clone()
 }
 
 /// wrt - The variable to derive With Respect To
-fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
+fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> T {
     use TapeValue::*;
     // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
     let grad = match nodes[idx as usize].value {
         Value(_) => {
             if idx == wrt {
-                1.
+                T::one()
             } else {
-                0.
+                T::default()
             }
         }
         Add(lhs, rhs) => derive(nodes, lhs, wrt) + derive(nodes, rhs, wrt),
@@ -288,7 +324,7 @@ fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
             let drhs = derive(nodes, rhs, wrt);
             let elhs = value(nodes, lhs);
             let erhs = value(nodes, rhs);
-            dlhs / erhs - elhs / erhs / erhs * drhs
+            dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
         }
         Neg(term) => -derive(nodes, term, wrt),
         UnaryFn(UnaryFnPayload { term, grad, .. }) => {
@@ -298,37 +334,37 @@ fn derive(nodes: &mut [TapeNode], idx: u32, wrt: u32) -> f64 {
     grad
 }
 
-fn clear_grad(nodes: &mut [TapeNode]) {
+fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
     for node in nodes {
-        node.grad = 0.;
+        node.grad = T::default();
     }
 }
 
 /// Assign gradient to all nodes
-fn backprop_rec(nodes: &mut [TapeNode], idx: u32, grad: f64) {
+fn backprop_rec<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, grad: T) {
     use TapeValue::*;
-    nodes[idx as usize].grad += grad;
+    nodes[idx as usize].grad += grad.clone();
     match nodes[idx as usize].value {
         Value(_) => (),
         Add(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad);
-            backprop_rec(nodes, rhs, grad);
+            backprop_rec(nodes, lhs, grad.clone());
+            backprop_rec(nodes, rhs, grad.clone());
         }
         Sub(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad);
+            backprop_rec(nodes, lhs, grad.clone());
             backprop_rec(nodes, rhs, -grad);
         }
         Mul(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad * erhs);
+            backprop_rec(nodes, lhs, grad.clone() * erhs);
             backprop_rec(nodes, rhs, grad * elhs);
         }
         Div(lhs, rhs) => {
             let erhs = value(nodes, rhs);
             let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad / erhs);
-            backprop_rec(nodes, rhs, -grad * elhs / erhs / erhs);
+            backprop_rec(nodes, lhs, grad.clone() / erhs.clone());
+            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs);
         }
         Neg(term) => backprop_rec(nodes, term, -grad),
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {

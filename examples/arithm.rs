@@ -22,6 +22,6 @@ fn main() {
     let abcd_c = abcd.derive(&c);
     println!("d((a + b) * c / d) / dc = {}", abcd_c);
 
-    abcd.backprop();
-    abcd.dot(&mut std::io::stdout()).unwrap();
+    abc.backprop();
+    abc.dot(&mut std::io::stdout()).unwrap();
 }
