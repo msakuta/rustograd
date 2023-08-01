@@ -3,6 +3,15 @@
 
 use std::{cell::RefCell, fmt::Display, io::Write};
 
+/// A trait that represents a type that can be used as a value in this library.
+///
+/// An implementation for f64 is provided by the crate, but you can implement it for
+/// your custom type, such as vectors, matrices or complex numbers.
+///
+/// As a minimum-dependency library, this crate does not provide with the implementations
+/// of other crate's tensor types, such as ndarray.
+/// It also does not use popular trait libraries such as num-trait, so you need to implement
+/// `one` and `is_zero` at least.
 pub trait Tensor:
     std::ops::Add<Self, Output = Self>
     + std::ops::AddAssign<Self>
@@ -30,6 +39,11 @@ impl Tensor for f64 {
 }
 
 #[derive(Default, Debug)]
+/// A storage for [`TapeTerm`]s.
+///
+/// It is a growable buffer of expression nodes.
+/// The implementation tend to be faster than nodes allocated randomly in heap memory.
+/// Also the deallocation is much faster because it merely frees the dynamic array once.
 pub struct Tape<T: Default = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
 }
@@ -60,6 +74,37 @@ enum TapeValue<T> {
     UnaryFn(UnaryFnPayload<T>),
 }
 
+/// An implementation of forward/reverse mode automatic differentiation, using memory arena called a [`Tape`],
+/// to store term values.
+/// It is more efficient than [`crate::RcTerm`], but you need to allocate a [`Tape`] before adding terms.
+///
+/// It accepts a value type `T` that implements [`Tensor`] trait.
+///
+/// # Example
+///
+/// ```
+/// let tape = Tape::new();
+/// let a = tape.term("a", 123.);
+/// let b = tape.term("b", 321.);
+/// let c = tape.term("c", 42.);
+/// let ab = a + b;
+/// let abc = ab * c;
+/// println!("a + b = {}", ab.eval());
+/// println!("(a + b) * c = {}", abc.eval());
+/// let ab_a = ab.derive(&a);
+/// println!("d(a + b) / da = {}", ab_a);
+/// let abc_a = abc.derive(&a);
+/// println!("d((a + b) * c) / da = {}", abc_a);
+/// let abc_b = abc.derive(&b);
+/// println!("d((a + b) * c) / db = {}", abc_b);
+/// let abc_c = abc.derive(&c);
+/// println!("d((a + b) * c) / dc = {}", abc_c);
+///
+/// let d = tape.term("d", 2.);
+/// let abcd = abc / d;
+/// let abcd_c = abcd.derive(&c);
+/// println!("d((a + b) * c / d) / dc = {}", abcd_c);
+/// ```
 pub struct TapeTerm<'a, T: Default = f64> {
     tape: &'a Tape<T>,
     idx: u32,

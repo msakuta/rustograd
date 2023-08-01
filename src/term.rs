@@ -56,7 +56,34 @@ impl<'a> TermPayload<'a> {
     }
 }
 
+#[deprecated]
 #[derive(Clone, Debug)]
+/// An implementation of forward/reverse mode automatic differentiation, deprecated in favor of [`crate::TapeTerm`],
+/// which uses more compact memory representation and more ergonomic to use.
+/// 
+/// # Example
+/// 
+/// ```
+/// let a = Term::new("a", 123.);
+/// let b = Term::new("b", 321.);
+/// let c = Term::new("c", 42.);
+/// let ab = &a + &b;
+/// let abc = &ab * &c;
+/// let abc_a = abc.derive(&a);
+/// println!("d((a + b) * c) / da = {}", abc_a); // 42
+/// let abc_b = abc.derive(&b);
+/// println!("d((a + b) * c) / db = {}", abc_b); // 42
+/// let abc_c = abc.derive(&c);
+/// println!("d((a + b) * c) / dc = {}", abc_c); // 444
+/// 
+/// let d = Term::new("d", 2.);
+/// let abcd = &abc / &d;
+/// let abcd_c = abcd.derive(&c);
+/// println!("d((a + b) * c / d) / dc = {}", abcd_c);
+/// 
+/// abc.backprop();
+/// abc.dot(&mut std::io::stdout()).unwrap();
+/// ```
 pub struct Term<'a>(Box<TermPayload<'a>>);
 
 impl<'a> Add for &'a Term<'a> {
