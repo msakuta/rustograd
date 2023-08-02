@@ -24,7 +24,7 @@ enum TermInt {
 }
 
 impl TermInt {
-    fn eval(&self, callback: &impl Fn(f64)) -> f64 {
+    fn eval(&self, callback: &impl Fn(RcTerm)) -> f64 {
         use TermInt::*;
         match self {
             Value(val) => val.get(),
@@ -161,7 +161,7 @@ impl RcTerm {
     }
 
     /// Write graphviz dot file to the given writer.
-    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+    pub fn dot(&self, writer: &mut impl Write, hilight: Option<&RcTerm>) -> std::io::Result<()> {
         let mut map = Vec::new();
         self.accum(&mut map);
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
@@ -176,9 +176,16 @@ impl RcTerm {
             } else {
                 ""
             };
+            let border = if hilight
+                .is_some_and(|x| x.id() == *term as *const _ as usize)
+            {
+                " color=red penwidth=2"
+            } else {
+                ""
+            };
             writeln!(
                 writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
+                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}{border}];",
                 *id,
                 term.name,
                 term.data
@@ -270,11 +277,11 @@ impl RcTerm {
     }
 
     /// Assign gradient to all nodes
-    fn backprop_rec(&self, grad: f64, callback: &impl Fn(f64)) {
+    fn backprop_rec(&self, grad: f64, callback: &impl Fn(RcTerm)) {
         use TermInt::*;
         let grad_val = self.0.grad.get().unwrap_or(0.) + grad;
         self.0.grad.set(Some(grad_val));
-        callback(grad_val);
+        callback(self.clone());
         let null_callback = |_| ();
         match &self.0.value {
             Value(_) => (),
@@ -310,7 +317,7 @@ impl RcTerm {
     }
 
     /// Backpropagation with a callback for each visited node
-    pub fn backprop_cb(&self, callback: &impl Fn(f64)) {
+    pub fn backprop_cb(&self, callback: &impl Fn(RcTerm)) {
         self.clear_grad();
         self.backprop_rec(1., callback);
     }
@@ -322,19 +329,19 @@ impl RcTerm {
     }
 
     /// Evaluate value with a callback for each visited node
-    pub fn eval_cb(&self, callback: &impl Fn(f64)) -> f64 {
+    pub fn eval_cb(&self, callback: &impl Fn(RcTerm)) -> f64 {
         self.clear();
         self.eval_int(callback)
     }
 
     /// Internal function for recursive calls
-    fn eval_int(&self, callback: &impl Fn(f64)) -> f64 {
+    fn eval_int(&self, callback: &impl Fn(RcTerm)) -> f64 {
         if let Some(data) = self.0.data.get() {
             return data;
         }
         let val = self.0.value.eval(callback);
         self.0.data.set(Some(val));
-        callback(val);
+        callback(self.clone());
         val
     }
 
