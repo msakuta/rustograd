@@ -229,12 +229,14 @@ impl<'a, T: Tensor> std::ops::Neg for TapeTerm<'a, T> {
 impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
+        clear(&mut nodes);
         let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
         eval(&mut nodes, self.idx, callback)
     }
 
     pub fn eval_cb(&self, callback: &impl Fn(&[TapeNode<T>], u32)) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
+        clear(&mut nodes);
         eval(&mut nodes, self.idx, Some(callback))
     }
 
@@ -311,12 +313,21 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     }
 }
 
+fn clear<T: Tensor>(nodes: &mut [TapeNode<T>]) {
+    for node in nodes {
+        node.data = None;
+    }
+}
+
 fn eval<T: Tensor + 'static>(
     nodes: &mut [TapeNode<T>],
     idx: u32,
     callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
 ) -> T {
     use TapeValue::*;
+    if let Some(ref data) = nodes[idx as usize].data {
+        return data.clone();
+    }
     let data = match &nodes[idx as usize].value {
         Value(val) => val.clone(),
         &Add(lhs, rhs) => eval(nodes, lhs, callback) + eval(nodes, rhs, callback),
