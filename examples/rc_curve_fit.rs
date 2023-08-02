@@ -1,8 +1,5 @@
 //! Least squares fitting to a Gaussian distribution using gradient descent.
 
-#[macro_use]
-extern crate rustograd_macro;
-
 use rustograd::RcTerm;
 use rustograd_macro::rustograd;
 
@@ -97,9 +94,20 @@ fn main() {
         .unwrap();
     }
 
+    let counter = std::cell::Cell::new(0);
+    let callback = |_val| {
+        let i = counter.get();
+        let mut file =
+            std::io::BufWriter::new(std::fs::File::create(format!("dot{i}.dot")).unwrap());
+        model.loss.dot(&mut file).unwrap();
+        counter.set(i + 1);
+    };
+
     model.x.set(0.).unwrap();
-    model.loss.eval();
-    model.loss.backprop();
+    model.loss.clear();
+    model.loss.clear_grad();
+    model.loss.eval_cb(&callback);
+    model.loss.backprop_cb(&callback);
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
     model.loss.dot(&mut dotfile).unwrap();
 }

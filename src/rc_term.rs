@@ -345,6 +345,7 @@ impl RcTerm {
         }
     }
 
+    /// Create a builder for dot file writer configuration.
     pub fn dot_builder(&self) -> RcDotBuilder {
         RcDotBuilder {
             this: self.clone(),
@@ -360,6 +361,7 @@ struct DotEntry<'a> {
     parents: Vec<usize>,
 }
 
+/// The dot file writer configuration builder with the builder pattern.
 pub struct RcDotBuilder {
     this: RcTerm,
     show_values: bool,
@@ -367,16 +369,19 @@ pub struct RcDotBuilder {
 }
 
 impl RcDotBuilder {
+    /// Set whether to show values and gradients of the terms on the node labels
     pub fn show_values(mut self, v: bool) -> RcDotBuilder {
         self.show_values = v;
         self
     }
 
+    /// Set a term to show highlighted border around it.
     pub fn highlights(mut self, term: RcTerm) -> RcDotBuilder {
         self.hilight = Some(term);
         self
     }
 
+    /// Perform output of dot file
     pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
         let mut map = Vec::new();
         self.this.accum(&mut map);

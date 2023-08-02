@@ -165,11 +165,11 @@ fn main() {
             model.x.set(xs.clone()).unwrap();
             model.sample_y.set(truth_data.clone()).unwrap();
             model.loss.eval();
-            model.loss.backprop();
+            model.loss.backprop().unwrap();
             // println!("x: {}, sample_y: {}, dmu: {}", xs.0.len(), truth_data.0.len(), model.mu.grad().0.iter().sum::<f64>());
-            *mu -= model.mu.grad().0.iter().sum::<f64>() * RATE;
-            *sigma -= model.sigma.grad().0.iter().sum::<f64>() * RATE;
-            *scale -= model.scale.grad().0.iter().sum::<f64>() * RATE;
+            *mu -= model.mu.grad().unwrap().0.iter().sum::<f64>() * RATE;
+            *sigma -= model.sigma.grad().unwrap().0.iter().sum::<f64>() * RATE;
+            *scale -= model.scale.grad().unwrap().0.iter().sum::<f64>() * RATE;
         }
     };
 
@@ -222,9 +222,9 @@ fn main() {
     }
     model.x.set(MyTensor::default()).unwrap();
     model.gaussian.eval();
-    model.gaussian.backprop();
+    model.gaussian.backprop().unwrap();
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    model.gaussian.dot(&mut dotfile, false).unwrap();
+    model.gaussian.dot(&mut dotfile).unwrap();
 }
 
 struct Model<'a> {

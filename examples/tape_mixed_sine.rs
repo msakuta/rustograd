@@ -10,13 +10,13 @@ fn main() {
         let x = i as f64 / 20. * std::f64::consts::PI;
         a.set(x).unwrap();
         let value = all.eval();
-        all.backprop();
-        let grad = a.grad();
-        writeln!(file, "{x}, {value}, {}, {grad}", all.derive(&a)).unwrap();
+        all.backprop().unwrap();
+        let grad = a.grad().unwrap();
+        writeln!(file, "{x}, {value}, {}, {grad}", all.derive(&a).unwrap()).unwrap();
     }
     a.set(0.).unwrap();
-    all.backprop();
-    all.dot(&mut std::io::stdout(), false).unwrap();
+    all.backprop().unwrap();
+    all.dot(&mut std::io::stdout()).unwrap();
 }
 
 fn build_model(tape: &Tape) -> (TapeTerm, TapeTerm) {

@@ -107,17 +107,18 @@ fn main() {
     let abc = ab * c;
     println!("a + b = {}", ab.eval());
     println!("(a + b) * c = {}", abc.eval());
-    let ab_a = ab.derive(&a);
+    let ab_a = ab.derive(&a).unwrap();
     println!("d(a + b) / da = {}", ab_a);
-    let abc_a = abc.derive(&a);
+    let abc_a = abc.derive(&a).unwrap();
     println!("d((a + b) * c) / da = {}", abc_a);
-    let abc_b = abc.derive(&b);
+    let abc_b = abc.derive(&b).unwrap();
     println!("d((a + b) * c) / db = {}", abc_b);
-    let abc_c = abc.derive(&c);
+    let abc_c = abc.derive(&c).unwrap();
     println!("d((a + b) * c) / dc = {}", abc_c);
 
     let d = tape.term("d", MyTensor(vec![2.; ELEMS]));
     let abcd = abc / d;
-    let abcd_c = abcd.derive(&c);
+    abcd.eval();
+    let abcd_c = abcd.derive(&c).unwrap();
     println!("d((a + b) * c / d) / dc = {}", abcd_c);
 }

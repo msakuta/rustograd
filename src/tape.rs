@@ -3,6 +3,8 @@
 
 use std::{cell::RefCell, fmt::Display, io::Write};
 
+use crate::error::ValueNotDefinedError;
+
 /// A trait that represents a type that can be used as a value in this library.
 ///
 /// An implementation for f64 is provided by the crate, but you can implement it for
@@ -44,7 +46,7 @@ impl Tensor for f64 {
 /// It is a growable buffer of expression nodes.
 /// The implementation tend to be faster than nodes allocated randomly in heap memory.
 /// Also the deallocation is much faster because it merely frees the dynamic array once.
-pub struct Tape<T: Default = f64> {
+pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
 }
 
@@ -52,8 +54,8 @@ pub struct Tape<T: Default = f64> {
 struct TapeNode<T> {
     name: String,
     value: TapeValue<T>,
-    data: T,
-    grad: T,
+    data: Option<T>,
+    grad: Option<T>,
 }
 
 #[derive(Clone, Debug)]
@@ -105,13 +107,13 @@ enum TapeValue<T> {
 /// let abcd_c = abcd.derive(&c);
 /// println!("d((a + b) * c / d) / dc = {}", abcd_c);
 /// ```
-pub struct TapeTerm<'a, T: Default = f64> {
+pub struct TapeTerm<'a, T = f64> {
     tape: &'a Tape<T>,
     idx: u32,
 }
 
 // derive macro doesn't work for generics
-impl<'a, T: Default> Clone for TapeTerm<'a, T> {
+impl<'a, T> Clone for TapeTerm<'a, T> {
     fn clone(&self) -> Self {
         Self {
             tape: self.tape,
@@ -119,7 +121,7 @@ impl<'a, T: Default> Clone for TapeTerm<'a, T> {
         }
     }
 }
-impl<'a, T: Default> Copy for TapeTerm<'a, T> {}
+impl<'a, T> Copy for TapeTerm<'a, T> {}
 
 impl<T: Tensor> Tape<T> {
     pub fn new() -> Self {
@@ -132,8 +134,8 @@ impl<T: Tensor> Tape<T> {
         nodes.push(TapeNode {
             name: name.into(),
             value: TapeValue::Value(init),
-            data: T::default(),
-            grad: T::default(),
+            data: None,
+            grad: None,
         });
         TapeTerm {
             tape: self,
@@ -147,8 +149,8 @@ impl<T: Tensor> Tape<T> {
         nodes.push(TapeNode {
             name: name.into(),
             value,
-            data: T::default(),
-            grad: T::default(),
+            data: None,
+            grad: None,
         });
         TapeTerm {
             tape: self,
@@ -231,9 +233,9 @@ impl<'a, T: Tensor> TapeTerm<'a, T> {
     }
 
     /// One-time derivation. Does not update internal gradient values.
-    pub fn derive(&self, var: &Self) -> T {
+    pub fn derive(&self, var: &Self) -> Option<T> {
         if self.idx == var.idx {
-            T::one()
+            Some(T::one())
         } else {
             let mut nodes = self.tape.nodes.borrow_mut();
             derive(&mut nodes, self.idx, var.idx)
@@ -268,39 +270,190 @@ impl<'a, T: Tensor> TapeTerm<'a, T> {
         Ok(())
     }
 
-    pub fn backprop(&self) {
+    pub fn backprop(&self) -> Result<(), ValueNotDefinedError> {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        backprop_rec(&mut nodes, self.idx, T::one());
+        backprop_rec(&mut nodes, self.idx, T::one())
     }
 
     /// Write graphviz dot file to the given writer.
-    ///
-    /// Enabling `show_values` renders data values and gradients for each node.
-    pub fn dot(&self, writer: &mut impl Write, show_values: bool) -> std::io::Result<()> {
-        let nodes = self.tape.nodes.borrow();
+    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        self.dot_builder().dot(writer)
+    }
+
+    /// Create a builder for dot file writer configuration.
+    pub fn dot_builder(&self) -> TapeDotBuilder<'a, T> {
+        TapeDotBuilder {
+            this: *self,
+            show_values: false,
+            hilight: None,
+        }
+    }
+
+    pub fn grad(&self) -> Option<T> {
+        self.tape.nodes.borrow()[self.idx as usize].grad.clone()
+    }
+}
+
+fn eval<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32) -> T {
+    use TapeValue::*;
+    let data = match &nodes[idx as usize].value {
+        Value(val) => val.clone(),
+        &Add(lhs, rhs) => eval(nodes, lhs) + eval(nodes, rhs),
+        &Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
+        &Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
+        &Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
+        &Neg(term) => -eval(nodes, term),
+        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
+    };
+    nodes[idx as usize].data = Some(data.clone());
+    data
+}
+
+fn value<T: Clone>(nodes: &[TapeNode<T>], idx: u32) -> Option<T> {
+    nodes[idx as usize].data.clone()
+}
+
+/// wrt - The variable to derive With Respect To
+fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T> {
+    use TapeValue::*;
+    // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
+    let grad = match nodes[idx as usize].value {
+        Value(_) => {
+            if idx == wrt {
+                T::one()
+            } else {
+                T::default()
+            }
+        }
+        Add(lhs, rhs) => derive(nodes, lhs, wrt)? + derive(nodes, rhs, wrt)?,
+        Sub(lhs, rhs) => derive(nodes, lhs, wrt)? - derive(nodes, rhs, wrt)?,
+        Mul(lhs, rhs) => {
+            let dlhs = derive(nodes, lhs, wrt)?;
+            let drhs = derive(nodes, rhs, wrt)?;
+            dlhs * value(nodes, rhs)? + value(nodes, lhs)? * drhs
+        }
+        Div(lhs, rhs) => {
+            let dlhs = derive(nodes, lhs, wrt)?;
+            let drhs = derive(nodes, rhs, wrt)?;
+            let elhs = value(nodes, lhs)?;
+            let erhs = value(nodes, rhs)?;
+            dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
+        }
+        Neg(term) => -derive(nodes, term, wrt)?,
+        UnaryFn(UnaryFnPayload { term, grad, .. }) => {
+            grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+        }
+    };
+    Some(grad)
+}
+
+fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
+    for node in nodes {
+        node.grad = None;
+    }
+}
+
+/// Assign gradient to all nodes
+fn backprop_rec<T: Tensor>(
+    nodes: &mut [TapeNode<T>],
+    idx: u32,
+    grad: T,
+) -> Result<(), ValueNotDefinedError> {
+    use TapeValue::*;
+    if let Some(ref mut node_grad) = nodes[idx as usize].grad {
+        *node_grad += grad.clone();
+    } else {
+        nodes[idx as usize].grad = Some(grad.clone());
+    }
+    match nodes[idx as usize].value {
+        Value(_) => (),
+        Add(lhs, rhs) => {
+            backprop_rec(nodes, lhs, grad.clone())?;
+            backprop_rec(nodes, rhs, grad.clone())?;
+        }
+        Sub(lhs, rhs) => {
+            backprop_rec(nodes, lhs, grad.clone())?;
+            backprop_rec(nodes, rhs, -grad)?;
+        }
+        Mul(lhs, rhs) => {
+            let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+            let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+            backprop_rec(nodes, lhs, grad.clone() * erhs)?;
+            backprop_rec(nodes, rhs, grad * elhs)?;
+        }
+        Div(lhs, rhs) => {
+            let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+            let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+            backprop_rec(nodes, lhs, grad.clone() / erhs.clone())?;
+            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs)?;
+        }
+        Neg(term) => backprop_rec(nodes, term, -grad)?,
+        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+            let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
+            backprop_rec(nodes, term, grad * g(val))?
+        }
+    }
+    Ok(())
+}
+
+/// The dot file writer configuration builder with the builder pattern.
+pub struct TapeDotBuilder<'a, T: Default> {
+    this: TapeTerm<'a, T>,
+    show_values: bool,
+    hilight: Option<TapeTerm<'a, T>>,
+}
+
+impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
+    /// Set whether to show values and gradients of the terms on the node labels
+    pub fn show_values(mut self, v: bool) -> Self {
+        self.show_values = v;
+        self
+    }
+
+    /// Set a term to show highlighted border around it.
+    pub fn highlights(mut self, term: TapeTerm<'a, T>) -> Self {
+        self.hilight = Some(term);
+        self
+    }
+
+    /// Perform output of dot file
+    pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
+        let nodes = self.this.tape.nodes.borrow();
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
-            let color = if !term.grad.is_zero() {
+            let color = if term.grad.is_some() {
                 "style=filled fillcolor=\"#ffff7f\""
-            } else if !term.data.is_zero() {
+            } else if term.data.is_some() {
                 "style=filled fillcolor=\"#7fff7f\""
             } else {
                 ""
             };
-            if show_values {
-                writeln!(
-                    writer,
-                    "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}];",
-                    id, term.name, term.data, term.grad
-                )?;
+            let border = if self.hilight.as_ref().is_some_and(|x| x.idx == id as u32) {
+                " color=red penwidth=2"
             } else {
-                writeln!(
-                    writer,
-                    "a{} [label=\"{}\" shape=rect {color}];",
-                    id, term.name
-                )?;
-            }
+                ""
+            };
+            let label = if self.show_values {
+                format!(
+                    "\\ndata:{}, grad:{}",
+                    term.data
+                        .as_ref()
+                        .map(|v| format!("{v}"))
+                        .unwrap_or_else(|| "None".into()),
+                    term.grad
+                        .as_ref()
+                        .map(|v| format!("{v:0.2}"))
+                        .unwrap_or_else(|| "None".into())
+                )
+            } else {
+                "".to_string()
+            };
+            writeln!(
+                writer,
+                "a{} [label=\"{}{}\" shape=rect {color}{border}];",
+                id, term.name, label
+            )?;
         }
         use TapeValue::*;
         for (id, term) in nodes.iter().enumerate() {
@@ -319,102 +472,5 @@ impl<'a, T: Tensor> TapeTerm<'a, T> {
         }
         writeln!(writer, "}}")?;
         Ok(())
-    }
-
-    pub fn grad(&self) -> T {
-        self.tape.nodes.borrow()[self.idx as usize].grad.clone()
-    }
-}
-
-fn eval<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32) -> T {
-    use TapeValue::*;
-    let data = match &nodes[idx as usize].value {
-        Value(val) => val.clone(),
-        &Add(lhs, rhs) => eval(nodes, lhs) + eval(nodes, rhs),
-        &Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
-        &Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
-        &Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
-        &Neg(term) => -eval(nodes, term),
-        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
-    };
-    nodes[idx as usize].data = data.clone();
-    data
-}
-
-fn value<T: Clone>(nodes: &[TapeNode<T>], idx: u32) -> T {
-    nodes[idx as usize].data.clone()
-}
-
-/// wrt - The variable to derive With Respect To
-fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> T {
-    use TapeValue::*;
-    // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
-    let grad = match nodes[idx as usize].value {
-        Value(_) => {
-            if idx == wrt {
-                T::one()
-            } else {
-                T::default()
-            }
-        }
-        Add(lhs, rhs) => derive(nodes, lhs, wrt) + derive(nodes, rhs, wrt),
-        Sub(lhs, rhs) => derive(nodes, lhs, wrt) - derive(nodes, rhs, wrt),
-        Mul(lhs, rhs) => {
-            let dlhs = derive(nodes, lhs, wrt);
-            let drhs = derive(nodes, rhs, wrt);
-            dlhs * value(nodes, rhs) + value(nodes, lhs) * drhs
-        }
-        Div(lhs, rhs) => {
-            let dlhs = derive(nodes, lhs, wrt);
-            let drhs = derive(nodes, rhs, wrt);
-            let elhs = value(nodes, lhs);
-            let erhs = value(nodes, rhs);
-            dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
-        }
-        Neg(term) => -derive(nodes, term, wrt),
-        UnaryFn(UnaryFnPayload { term, grad, .. }) => {
-            grad(value(nodes, term)) * derive(nodes, term, wrt)
-        }
-    };
-    grad
-}
-
-fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
-    for node in nodes {
-        node.grad = T::default();
-    }
-}
-
-/// Assign gradient to all nodes
-fn backprop_rec<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, grad: T) {
-    use TapeValue::*;
-    nodes[idx as usize].grad += grad.clone();
-    match nodes[idx as usize].value {
-        Value(_) => (),
-        Add(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone());
-            backprop_rec(nodes, rhs, grad.clone());
-        }
-        Sub(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone());
-            backprop_rec(nodes, rhs, -grad);
-        }
-        Mul(lhs, rhs) => {
-            let erhs = value(nodes, rhs);
-            let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad.clone() * erhs);
-            backprop_rec(nodes, rhs, grad * elhs);
-        }
-        Div(lhs, rhs) => {
-            let erhs = value(nodes, rhs);
-            let elhs = value(nodes, lhs);
-            backprop_rec(nodes, lhs, grad.clone() / erhs.clone());
-            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs);
-        }
-        Neg(term) => backprop_rec(nodes, term, -grad),
-        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
-            let val = value(nodes, term);
-            backprop_rec(nodes, term, grad * g(val))
-        }
     }
 }

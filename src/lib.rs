@@ -1,3 +1,4 @@
+pub mod error;
 mod rc_term;
 mod tape;
 mod term;

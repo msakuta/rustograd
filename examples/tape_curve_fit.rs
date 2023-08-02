@@ -38,10 +38,10 @@ fn main() {
             model.x.set(xval).unwrap();
             model.sample_y.set(sample_y).unwrap();
             model.loss.eval();
-            model.loss.backprop();
-            *mu -= RATE * model.mu.grad();
-            *sigma -= RATE * model.sigma.grad();
-            *scale -= RATE * model.scale.grad();
+            model.loss.backprop().unwrap();
+            *mu -= RATE * model.mu.grad().unwrap();
+            *sigma -= RATE * model.sigma.grad().unwrap();
+            *scale -= RATE * model.scale.grad().unwrap();
         }
     };
 
@@ -95,9 +95,9 @@ fn main() {
     }
     model.x.set(0.).unwrap();
     model.gaussian.eval();
-    model.gaussian.backprop();
+    model.gaussian.backprop().unwrap();
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    model.gaussian.dot(&mut dotfile, false).unwrap();
+    model.gaussian.dot(&mut dotfile).unwrap();
 }
 
 struct Model<'a> {

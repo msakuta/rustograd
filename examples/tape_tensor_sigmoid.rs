@@ -110,9 +110,9 @@ fn main() {
     );
     x.set(xs).unwrap();
     let value = all.eval();
-    all.backprop();
-    let derive = all.derive(&x);
-    let grad = x.grad();
+    all.backprop().unwrap();
+    let derive = all.derive(&x).unwrap();
+    let grad = x.grad().unwrap();
     writeln!(file, "x, f(x), $df/dx$ (derive), $df/dx$ (backprop)").unwrap();
     for (((xval, &value), derive), grad) in XRANGE
         .zip(value.0.iter())
@@ -123,8 +123,8 @@ fn main() {
     }
     x.set(MyTensor::default()).unwrap();
     all.eval();
-    all.backprop();
-    all.dot(&mut std::io::stdout(), false).unwrap();
+    all.backprop().unwrap();
+    all.dot(&mut std::io::stdout()).unwrap();
 }
 
 fn my_exp(x: MyTensor) -> MyTensor {

@@ -47,13 +47,13 @@ fn main() {
             model.x.set(xval).unwrap();
             model.sample_y.set(sample_y).unwrap();
             model.loss.eval();
-            model.loss.backprop();
-            *mu0 -= RATE * model.mu0.grad();
-            *sigma0 -= RATE * model.sigma0.grad();
-            *scale0 -= RATE * model.scale0.grad();
-            *mu1 -= RATE * model.mu1.grad();
-            *sigma1 -= RATE * model.sigma1.grad();
-            *scale1 -= RATE * model.scale1.grad();
+            model.loss.backprop().unwrap();
+            *mu0 -= RATE * model.mu0.grad().unwrap();
+            *sigma0 -= RATE * model.sigma0.grad().unwrap();
+            *scale0 -= RATE * model.scale0.grad().unwrap();
+            *mu1 -= RATE * model.mu1.grad().unwrap();
+            *sigma1 -= RATE * model.sigma1.grad().unwrap();
+            *scale1 -= RATE * model.scale1.grad().unwrap();
         }
     };
 
@@ -128,9 +128,9 @@ fn main() {
     }
     model.x.set(0.).unwrap();
     model.y.eval();
-    model.y.backprop();
+    model.y.backprop().unwrap();
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    model.y.dot(&mut dotfile, false).unwrap();
+    model.y.dot(&mut dotfile).unwrap();
 }
 
 struct Model<'a> {
