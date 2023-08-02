@@ -279,7 +279,17 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn backprop(&self) -> Result<(), ValueNotDefinedError> {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        backprop_rec(&mut nodes, self.idx, T::one())
+        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
+        backprop_rec(&mut nodes, self.idx, T::one(), callback)
+    }
+
+    pub fn backprop_cb(
+        &self,
+        callback: &impl Fn(&[TapeNode<T>], u32),
+    ) -> Result<(), ValueNotDefinedError> {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        clear_grad(&mut nodes);
+        backprop_rec(&mut nodes, self.idx, T::one(), Some(callback))
     }
 
     /// Write graphviz dot file to the given writer.
@@ -372,6 +382,7 @@ fn backprop_rec<T: Tensor>(
     nodes: &mut [TapeNode<T>],
     idx: u32,
     grad: T,
+    callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
 ) -> Result<(), ValueNotDefinedError> {
     use TapeValue::*;
     if let Some(ref mut node_grad) = nodes[idx as usize].grad {
@@ -379,32 +390,35 @@ fn backprop_rec<T: Tensor>(
     } else {
         nodes[idx as usize].grad = Some(grad.clone());
     }
+    if let Some(callback) = callback {
+        callback(nodes, idx);
+    }
     match nodes[idx as usize].value {
         Value(_) => (),
         Add(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone())?;
-            backprop_rec(nodes, rhs, grad.clone())?;
+            backprop_rec(nodes, lhs, grad.clone(), callback)?;
+            backprop_rec(nodes, rhs, grad.clone(), callback)?;
         }
         Sub(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone())?;
-            backprop_rec(nodes, rhs, -grad)?;
+            backprop_rec(nodes, lhs, grad.clone(), callback)?;
+            backprop_rec(nodes, rhs, -grad, callback)?;
         }
         Mul(lhs, rhs) => {
             let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
             let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, lhs, grad.clone() * erhs)?;
-            backprop_rec(nodes, rhs, grad * elhs)?;
+            backprop_rec(nodes, lhs, grad.clone() * erhs, callback)?;
+            backprop_rec(nodes, rhs, grad * elhs, callback)?;
         }
         Div(lhs, rhs) => {
             let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
             let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, lhs, grad.clone() / erhs.clone())?;
-            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs)?;
+            backprop_rec(nodes, lhs, grad.clone() / erhs.clone(), callback)?;
+            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs, callback)?;
         }
-        Neg(term) => backprop_rec(nodes, term, -grad)?,
+        Neg(term) => backprop_rec(nodes, term, -grad, callback)?,
         UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
             let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, term, grad * g(val))?
+            backprop_rec(nodes, term, grad * g(val), callback)?
         }
     }
     Ok(())
