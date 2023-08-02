@@ -161,51 +161,8 @@ impl RcTerm {
     }
 
     /// Write graphviz dot file to the given writer.
-    pub fn dot(&self, writer: &mut impl Write, hilight: Option<&RcTerm>) -> std::io::Result<()> {
-        let mut map = Vec::new();
-        self.accum(&mut map);
-        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
-        for entry in &map {
-            let DotEntry {
-                id, payload: term, ..
-            } = entry;
-            let color = if term.grad.get().is_some() {
-                "style=filled fillcolor=\"#ffff7f\""
-            } else if term.data.get().is_some() {
-                "style=filled fillcolor=\"#7fff7f\""
-            } else {
-                ""
-            };
-            let border = if hilight
-                .is_some_and(|x| x.id() == *term as *const _ as usize)
-            {
-                " color=red penwidth=2"
-            } else {
-                ""
-            };
-            writeln!(
-                writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}{border}];",
-                *id,
-                term.name,
-                term.data
-                    .get()
-                    .map(|v| format!("{v}"))
-                    .unwrap_or_else(|| "None".into()),
-                term.grad
-                    .get()
-                    .map(|v| format!("{v:0.2}"))
-                    .unwrap_or_else(|| "None".into())
-            )?;
-        }
-        for entry in &map {
-            let DotEntry { id, parents, .. } = entry;
-            for pid in parents {
-                writeln!(writer, "a{} -> a{};", pid, *id)?;
-            }
-        }
-        writeln!(writer, "}}")?;
-        Ok(())
+    pub fn dot(&self, writer: &mut impl Write) -> std::io::Result<()> {
+        self.dot_builder().dot(writer)
     }
 
     fn id(&self) -> usize {
@@ -387,10 +344,85 @@ impl RcTerm {
             Err("Cannot set value to non-leaf nodes".into())
         }
     }
+
+    pub fn dot_builder(&self) -> DotBuilder {
+        DotBuilder {
+            this: self.clone(),
+            show_values: true,
+            hilight: None,
+        }
+    }
 }
 
 struct DotEntry<'a> {
     id: usize,
     payload: &'a TermPayload,
     parents: Vec<usize>,
+}
+
+pub struct DotBuilder {
+    this: RcTerm,
+    show_values: bool,
+    hilight: Option<RcTerm>,
+}
+
+impl DotBuilder {
+    pub fn show_values(mut self, v: bool) -> DotBuilder {
+        self.show_values = v;
+        self
+    }
+
+    pub fn highlights(mut self, term: RcTerm) -> DotBuilder {
+        self.hilight = Some(term);
+        self
+    }
+
+    pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
+        let mut map = Vec::new();
+        self.this.accum(&mut map);
+        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
+        for entry in &map {
+            let DotEntry {
+                id, payload: term, ..
+            } = entry;
+            let color = if term.grad.get().is_some() {
+                "style=filled fillcolor=\"#ffff7f\""
+            } else if term.data.get().is_some() {
+                "style=filled fillcolor=\"#7fff7f\""
+            } else {
+                ""
+            };
+            let border = if self
+                .hilight
+                .as_ref()
+                .is_some_and(|x| x.id() == *term as *const _ as usize)
+            {
+                " color=red penwidth=2"
+            } else {
+                ""
+            };
+            writeln!(
+                writer,
+                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}{border}];",
+                *id,
+                term.name,
+                term.data
+                    .get()
+                    .map(|v| format!("{v}"))
+                    .unwrap_or_else(|| "None".into()),
+                term.grad
+                    .get()
+                    .map(|v| format!("{v:0.2}"))
+                    .unwrap_or_else(|| "None".into())
+            )?;
+        }
+        for entry in &map {
+            let DotEntry { id, parents, .. } = entry;
+            for pid in parents {
+                writeln!(writer, "a{} -> a{};", pid, *id)?;
+            }
+        }
+        writeln!(writer, "}}")?;
+        Ok(())
+    }
 }

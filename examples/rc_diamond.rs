@@ -18,7 +18,7 @@ fn main() {
         let i = counter.get();
         let mut file =
             std::io::BufWriter::new(std::fs::File::create(format!("dot{i}.dot")).unwrap());
-        abac.dot(&mut file, Some(&term)).unwrap();
+        abac.dot_builder().highlights(term).dot(&mut file).unwrap();
         counter.set(i + 1);
     };
 
@@ -28,5 +28,5 @@ fn main() {
     println!("a: {}", a.grad());
     println!("b: {}", b.grad());
     println!("c: {}", c.grad());
-    abac.dot(&mut std::io::stdout(), None).unwrap();
+    abac.dot(&mut std::io::stdout()).unwrap();
 }
