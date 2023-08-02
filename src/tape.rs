@@ -51,7 +51,7 @@ pub struct Tape<T = f64> {
 }
 
 #[derive(Clone, Debug)]
-struct TapeNode<T> {
+pub struct TapeNode<T> {
     name: String,
     value: TapeValue<T>,
     data: Option<T>,
@@ -226,10 +226,16 @@ impl<'a, T: Tensor> std::ops::Neg for TapeTerm<'a, T> {
     }
 }
 
-impl<'a, T: Tensor> TapeTerm<'a, T> {
+impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
-        eval(&mut nodes, self.idx)
+        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
+        eval(&mut nodes, self.idx, callback)
+    }
+
+    pub fn eval_cb(&self, callback: &impl Fn(&[TapeNode<T>], u32)) -> T {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        eval(&mut nodes, self.idx, Some(callback))
     }
 
     /// One-time derivation. Does not update internal gradient values.
@@ -295,18 +301,25 @@ impl<'a, T: Tensor> TapeTerm<'a, T> {
     }
 }
 
-fn eval<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32) -> T {
+fn eval<T: Tensor + 'static>(
+    nodes: &mut [TapeNode<T>],
+    idx: u32,
+    callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
+) -> T {
     use TapeValue::*;
     let data = match &nodes[idx as usize].value {
         Value(val) => val.clone(),
-        &Add(lhs, rhs) => eval(nodes, lhs) + eval(nodes, rhs),
-        &Sub(lhs, rhs) => eval(nodes, lhs) - eval(nodes, rhs),
-        &Mul(lhs, rhs) => eval(nodes, lhs) * eval(nodes, rhs),
-        &Div(lhs, rhs) => eval(nodes, lhs) / eval(nodes, rhs),
-        &Neg(term) => -eval(nodes, term),
-        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term)),
+        &Add(lhs, rhs) => eval(nodes, lhs, callback) + eval(nodes, rhs, callback),
+        &Sub(lhs, rhs) => eval(nodes, lhs, callback) - eval(nodes, rhs, callback),
+        &Mul(lhs, rhs) => eval(nodes, lhs, callback) * eval(nodes, rhs, callback),
+        &Div(lhs, rhs) => eval(nodes, lhs, callback) / eval(nodes, rhs, callback),
+        &Neg(term) => -eval(nodes, term, callback),
+        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term, callback)),
     };
     nodes[idx as usize].data = Some(data.clone());
+    if let Some(callback) = callback {
+        callback(nodes, idx);
+    }
     data
 }
 
@@ -401,7 +414,7 @@ fn backprop_rec<T: Tensor>(
 pub struct TapeDotBuilder<'a, T: Default> {
     this: TapeTerm<'a, T>,
     show_values: bool,
-    hilight: Option<TapeTerm<'a, T>>,
+    hilight: Option<u32>,
 }
 
 impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
@@ -412,7 +425,7 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     }
 
     /// Set a term to show highlighted border around it.
-    pub fn highlights(mut self, term: TapeTerm<'a, T>) -> Self {
+    pub fn highlights(mut self, term: u32) -> Self {
         self.hilight = Some(term);
         self
     }
@@ -420,6 +433,14 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Perform output of dot file
     pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
         let nodes = self.this.tape.nodes.borrow();
+        self.dot_borrowed(&nodes, writer)
+    }
+
+    pub fn dot_borrowed(
+        self,
+        nodes: &[TapeNode<T>],
+        writer: &mut impl Write,
+    ) -> std::io::Result<()> {
         writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
         for (id, term) in nodes.iter().enumerate() {
             let color = if term.grad.is_some() {
@@ -429,7 +450,7 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
             } else {
                 ""
             };
-            let border = if self.hilight.as_ref().is_some_and(|x| x.idx == id as u32) {
+            let border = if self.hilight.is_some_and(|x| x == id as u32) {
                 " color=red penwidth=2"
             } else {
                 ""
