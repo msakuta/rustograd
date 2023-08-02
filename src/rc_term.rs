@@ -345,8 +345,8 @@ impl RcTerm {
         }
     }
 
-    pub fn dot_builder(&self) -> DotBuilder {
-        DotBuilder {
+    pub fn dot_builder(&self) -> RcDotBuilder {
+        RcDotBuilder {
             this: self.clone(),
             show_values: true,
             hilight: None,
@@ -360,19 +360,19 @@ struct DotEntry<'a> {
     parents: Vec<usize>,
 }
 
-pub struct DotBuilder {
+pub struct RcDotBuilder {
     this: RcTerm,
     show_values: bool,
     hilight: Option<RcTerm>,
 }
 
-impl DotBuilder {
-    pub fn show_values(mut self, v: bool) -> DotBuilder {
+impl RcDotBuilder {
+    pub fn show_values(mut self, v: bool) -> RcDotBuilder {
         self.show_values = v;
         self
     }
 
-    pub fn highlights(mut self, term: RcTerm) -> DotBuilder {
+    pub fn highlights(mut self, term: RcTerm) -> RcDotBuilder {
         self.hilight = Some(term);
         self
     }
@@ -401,19 +401,25 @@ impl DotBuilder {
             } else {
                 ""
             };
+            let label = if self.show_values {
+                format!(
+                    "\\ndata:{}, grad:{}",
+                    term.data
+                        .get()
+                        .map(|v| format!("{v}"))
+                        .unwrap_or_else(|| "None".into()),
+                    term.grad
+                        .get()
+                        .map(|v| format!("{v:0.2}"))
+                        .unwrap_or_else(|| "None".into())
+                )
+            } else {
+                "".to_string()
+            };
             writeln!(
                 writer,
-                "a{} [label=\"{} \\ndata:{}, grad:{}\" shape=rect {color}{border}];",
-                *id,
-                term.name,
-                term.data
-                    .get()
-                    .map(|v| format!("{v}"))
-                    .unwrap_or_else(|| "None".into()),
-                term.grad
-                    .get()
-                    .map(|v| format!("{v:0.2}"))
-                    .unwrap_or_else(|| "None".into())
+                "a{} [label=\"{}{}\" shape=rect {color}{border}];",
+                *id, term.name, label
             )?;
         }
         for entry in &map {
