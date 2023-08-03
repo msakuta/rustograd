@@ -308,9 +308,15 @@ We can measure the performance of each type of terms.
 We tested with `RcTerm`, `TapeTerm<f64>` and `TapeTerm<MyTensor>`, where
 `MyTensor` is custom implementation of 1-D vector.
 
-The plot below shows comparison of each implementation in [rc_curve_fit](examples/rc_curve_fit.rs), [tape_curve_fit](examples/tape_curve_fit.rs) and [tape_tensor_curve_fit](examples/tape_tensor_curve_fit.rs).
-As you can see, `TapeTerm<f64>` is faster than `RcTerm` and `TapeTerm<MyTensor>` is (marginally) faster than `TapeTerm<f64>`.
-It indicates that even though `MyTensor` uses heap memory allocation, it is still faster to aggregate operation in an expression, rather than scanning the scaler value and evaluating each of them.
-Next step is to investigate if using a memory arena for the contents of the tensor helps further.
+The plot below shows comparison of each implementation in [rc_curve_fit](examples/rc_curve_fit.rs), [rc_tensor_curve_fit](examples/rc_tensor_curve_fit.rs), [tape_curve_fit](examples/tape_curve_fit.rs) and [tape_tensor_curve_fit](examples/tape_tensor_curve_fit.rs).
+The difference between `rc` and `rc_refcell` is that the former uses `Cell` as the container of the value, while the latter uses `RefCell`.
+If the value is a `Copy`, we could use `Cell` and there is no overhead in runtime borrow checking, but if it was not a `Copy`, we have to use `RefCell` to update it.
+A tensor is (usually) not a copy, so we have to use `RefCell`, so I was interested in the overhead.
 
 ![term_perf](images/term_perf.png)
+
+As you can see, `TapeTerm<f64>` is faster than `RcTerm<f64>`.
+Also, the performance gain by changing from `f64` (scalar) to `MyTensor` is greater than the introduction of `RefCell`, and it is almost the same between `RcTerm<MyTensor>` and `TapeTerm<MyTensor>`.
+
+It indicates that even though `MyTensor` uses additional heap memory allocation, it is still faster to aggregate operation in an expression, rather than scanning the scalar value and evaluating each of them.
+Next step is to investigate if using a memory arena for the contents of the tensor helps further.
