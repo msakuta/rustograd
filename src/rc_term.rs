@@ -1,33 +1,34 @@
 use std::{
-    cell::Cell,
+    cell::{Cell, RefCell},
     io::Write,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
 };
 
-#[derive(Clone, Debug)]
-struct UnaryFnPayload {
-    term: RcTerm,
-    f: fn(f64) -> f64,
-    grad: fn(f64) -> f64,
+use crate::tensor::Tensor;
+
+#[derive(Clone)]
+struct UnaryFnPayload<T: Tensor> {
+    term: RcTerm<T>,
+    f: fn(T) -> T,
+    grad: fn(T) -> T,
 }
 
-#[derive(Clone, Debug)]
-enum TermInt {
-    Value(Cell<f64>),
-    Add(RcTerm, RcTerm),
-    Sub(RcTerm, RcTerm),
-    Mul(RcTerm, RcTerm),
-    Div(RcTerm, RcTerm),
-    Neg(RcTerm),
-    UnaryFn(UnaryFnPayload),
+enum TermInt<T: Tensor> {
+    Value(RefCell<T>),
+    Add(RcTerm<T>, RcTerm<T>),
+    Sub(RcTerm<T>, RcTerm<T>),
+    Mul(RcTerm<T>, RcTerm<T>),
+    Div(RcTerm<T>, RcTerm<T>),
+    Neg(RcTerm<T>),
+    UnaryFn(UnaryFnPayload<T>),
 }
 
-impl TermInt {
-    fn eval(&self, callback: &impl Fn(RcTerm)) -> f64 {
+impl<T: Tensor> TermInt<T> {
+    fn eval(&self, callback: &impl Fn(RcTerm<T>)) -> T {
         use TermInt::*;
         match self {
-            Value(val) => val.get(),
+            Value(val) => val.clone().into_inner(),
             Add(lhs, rhs) => lhs.eval_int(callback) + rhs.eval_int(callback),
             Sub(lhs, rhs) => lhs.eval_int(callback) - rhs.eval_int(callback),
             Mul(lhs, rhs) => lhs.eval_int(callback) * rhs.eval_int(callback),
@@ -38,23 +39,32 @@ impl TermInt {
     }
 }
 
-#[derive(Clone, Debug)]
-struct TermPayload {
+struct TermPayload<T: Tensor> {
     name: String,
-    value: TermInt,
-    data: Cell<Option<f64>>,
-    grad: Cell<Option<f64>>,
+    value: TermInt<T>,
+    data: RefCell<Option<T>>,
+    grad: RefCell<Option<T>>,
 }
 
-impl TermPayload {
-    fn new(name: String, value: TermInt) -> TermPayload {
+impl<T: Tensor> TermPayload<T> {
+    fn new(name: String, value: TermInt<T>) -> Self {
         let data = value.eval(&|_| ());
         Self {
             name,
             value,
-            data: Cell::new(Some(data)),
-            grad: Cell::new(None),
+            data: RefCell::new(Some(data)),
+            grad: RefCell::new(None),
         }
+    }
+}
+
+impl<T: Tensor> std::fmt::Debug for TermPayload<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TermPayload")
+            .field("name", &self.name)
+            .field("data", &self.data.borrow().is_some())
+            .field("grad", &self.grad.borrow().is_some())
+            .finish()
     }
 }
 
@@ -90,10 +100,10 @@ impl TermPayload {
 /// abcd.backprop();
 /// abcd.dot(&mut std::io::stdout()).unwrap();
 /// ```
-pub struct RcTerm(Rc<TermPayload>);
+pub struct RcTerm<T: Tensor = f64>(Rc<TermPayload<T>>);
 
-impl Add for &RcTerm {
-    type Output = RcTerm;
+impl<T: Tensor> Add for &RcTerm<T> {
+    type Output = RcTerm<T>;
     fn add(self, rhs: Self) -> Self::Output {
         let name = format!("({} + {})", self.0.name, rhs.0.name);
         RcTerm::new_payload(TermPayload::new(
@@ -103,8 +113,8 @@ impl Add for &RcTerm {
     }
 }
 
-impl Sub for &RcTerm {
-    type Output = RcTerm;
+impl<T: Tensor> Sub for &RcTerm<T> {
+    type Output = RcTerm<T>;
     fn sub(self, rhs: Self) -> Self::Output {
         let name = format!("({} - {})", self.0.name, rhs.0.name);
         RcTerm::new_payload(TermPayload::new(
@@ -114,8 +124,8 @@ impl Sub for &RcTerm {
     }
 }
 
-impl Mul for &RcTerm {
-    type Output = RcTerm;
+impl<T: Tensor> Mul for &RcTerm<T> {
+    type Output = RcTerm<T>;
     fn mul(self, rhs: Self) -> Self::Output {
         let name = format!("{} * {}", self.0.name, rhs.0.name);
         RcTerm::new_payload(TermPayload::new(
@@ -125,8 +135,8 @@ impl Mul for &RcTerm {
     }
 }
 
-impl Div for &RcTerm {
-    type Output = RcTerm;
+impl<T: Tensor> Div for &RcTerm<T> {
+    type Output = RcTerm<T>;
     fn div(self, rhs: Self) -> Self::Output {
         let name = format!("{} / {}", self.0.name, rhs.0.name);
         RcTerm::new_payload(TermPayload::new(
@@ -136,28 +146,28 @@ impl Div for &RcTerm {
     }
 }
 
-impl<'a> std::ops::Neg for &RcTerm {
-    type Output = RcTerm;
+impl<T: Tensor> std::ops::Neg for &RcTerm<T> {
+    type Output = RcTerm<T>;
     fn neg(self) -> Self::Output {
         let name = format!("-{}", self.0.name);
         RcTerm::new_payload(TermPayload::new(name, TermInt::Neg(self.clone())))
     }
 }
 
-impl RcTerm {
-    pub fn new(name: impl Into<String>, val: f64) -> RcTerm {
+impl<T: Tensor> RcTerm<T> {
+    pub fn new(name: impl Into<String>, val: T) -> RcTerm<T> {
         Self(Rc::new(TermPayload::new(
             name.into(),
-            TermInt::Value(Cell::new(val)),
+            TermInt::Value(RefCell::new(val)),
         )))
     }
 
-    fn new_payload(val: TermPayload) -> Self {
+    fn new_payload(val: TermPayload<T>) -> Self {
         Self(Rc::new(val))
     }
 
-    pub fn grad(&self) -> f64 {
-        self.0.grad.get().unwrap()
+    pub fn grad(&self) -> T {
+        self.0.grad.borrow().clone().unwrap()
     }
 
     /// Write graphviz dot file to the given writer.
@@ -170,7 +180,7 @@ impl RcTerm {
         payload as *const _ as usize
     }
 
-    fn accum<'a>(&'a self, map: &mut Vec<DotEntry<'a>>) {
+    fn accum<'a>(&'a self, map: &mut Vec<DotEntry<'a, T>>) {
         use TermInt::*;
         let parents = match &self.0.value {
             Value(_) => vec![],
@@ -192,13 +202,13 @@ impl RcTerm {
     }
 
     /// One-time derivation. Does not update internal gradient values.
-    pub fn derive(&self, var: &Self) -> f64 {
+    pub fn derive(&self, var: &Self) -> T {
         use TermInt::*;
         let grad = if self.id() == var.id() {
-            1.
+            T::one()
         } else {
             match &self.0.value {
-                Value(_) => 0.,
+                Value(_) => T::default(),
                 Add(lhs, rhs) => lhs.derive(var) + rhs.derive(var),
                 Sub(lhs, rhs) => lhs.derive(var) - rhs.derive(var),
                 Mul(lhs, rhs) => {
@@ -211,7 +221,7 @@ impl RcTerm {
                     let erhs = rhs.eval();
                     let dlhs = lhs.derive(var);
                     let drhs = rhs.derive(var);
-                    dlhs / erhs - elhs / erhs / erhs * drhs
+                    dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
                 }
                 Neg(term) => -term.derive(var),
                 UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
@@ -222,7 +232,7 @@ impl RcTerm {
 
     pub fn clear_grad(&self) {
         use TermInt::*;
-        self.0.grad.set(None);
+        *self.0.grad.borrow_mut() = None;
         match &self.0.value {
             Value(_) => (),
             Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
@@ -234,10 +244,14 @@ impl RcTerm {
     }
 
     /// Assign gradient to all nodes
-    fn backprop_rec(&self, grad: f64, callback: &impl Fn(RcTerm)) {
+    fn backprop_rec(&self, grad: &T, callback: &impl Fn(RcTerm<T>)) {
         use TermInt::*;
-        let grad_val = self.0.grad.get().unwrap_or(0.) + grad;
-        self.0.grad.set(Some(grad_val));
+        {
+            let mut borrow = self.0.grad.borrow_mut();
+            let grad_val =
+                borrow.as_ref().map(Clone::clone).unwrap_or_else(T::default) + grad.clone();
+            *borrow = Some(grad_val);
+        }
         callback(self.clone());
         let null_callback = |_| ();
         match &self.0.value {
@@ -248,22 +262,22 @@ impl RcTerm {
             }
             Sub(lhs, rhs) => {
                 lhs.backprop_rec(grad, callback);
-                rhs.backprop_rec(-grad, callback);
+                rhs.backprop_rec(&-grad.clone(), callback);
             }
             Mul(lhs, rhs) => {
-                lhs.backprop_rec(grad * rhs.eval_int(&null_callback), callback);
-                rhs.backprop_rec(grad * lhs.eval_int(&null_callback), callback);
+                lhs.backprop_rec(&(grad.clone() * rhs.eval_int(&null_callback)), callback);
+                rhs.backprop_rec(&(grad.clone() * lhs.eval_int(&null_callback)), callback);
             }
             Div(lhs, rhs) => {
                 let erhs = rhs.eval_int(&null_callback);
                 let elhs = lhs.eval_int(&null_callback);
-                lhs.backprop_rec(grad / erhs, callback);
-                rhs.backprop_rec(-grad * elhs / erhs / erhs, callback);
+                lhs.backprop_rec(&(grad.clone() / erhs.clone()), callback);
+                rhs.backprop_rec(&(-grad.clone() * elhs / erhs.clone() / erhs), callback);
             }
-            Neg(term) => term.backprop_rec(-grad, callback),
+            Neg(term) => term.backprop_rec(&-grad.clone(), callback),
             UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
                 let val = term.eval_int(&null_callback);
-                term.backprop_rec(grad * g(val), callback);
+                term.backprop_rec(&(grad.clone() * g(val)), callback);
             }
         }
     }
@@ -274,37 +288,40 @@ impl RcTerm {
     }
 
     /// Backpropagation with a callback for each visited node
-    pub fn backprop_cb(&self, callback: &impl Fn(RcTerm)) {
+    pub fn backprop_cb(&self, callback: &impl Fn(RcTerm<T>)) {
         self.clear_grad();
-        self.backprop_rec(1., callback);
+        self.backprop_rec(&T::one(), callback);
     }
 
     /// Evaluate value with possibly updated value by [`set`]
-    pub fn eval(&self) -> f64 {
+    pub fn eval(&self) -> T {
         self.clear();
         self.eval_int(&|_| ())
     }
 
     /// Evaluate value with a callback for each visited node
-    pub fn eval_cb(&self, callback: &impl Fn(RcTerm)) -> f64 {
+    pub fn eval_cb(&self, callback: &impl Fn(RcTerm<T>)) -> T {
         self.clear();
         self.eval_int(callback)
     }
 
     /// Internal function for recursive calls
-    fn eval_int(&self, callback: &impl Fn(RcTerm)) -> f64 {
-        if let Some(data) = self.0.data.get() {
-            return data;
+    fn eval_int(&self, callback: &impl Fn(RcTerm<T>)) -> T {
+        if let Some(data) = self.0.data.borrow().as_ref() {
+            return data.clone();
         }
         let val = self.0.value.eval(callback);
-        self.0.data.set(Some(val));
+        *self.0.data.borrow_mut() = Some(val.clone());
+        if self.0.data.try_borrow().is_err() {
+            println!("borrowed: true");
+        }
         callback(self.clone());
         val
     }
 
     pub fn clear(&self) {
         use TermInt::*;
-        self.0.data.set(None);
+        *self.0.data.borrow_mut() = None;
         match &self.0.value {
             Value(_) => (),
             Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
@@ -315,15 +332,15 @@ impl RcTerm {
         };
     }
 
-    pub fn exp(&self) -> Self {
-        self.apply("exp", f64::exp, f64::exp)
-    }
+    // pub fn exp(&self) -> Self {
+    //     self.apply("exp", f64::exp, f64::exp)
+    // }
 
     pub fn apply(
         &self,
         name: &(impl AsRef<str> + ?Sized),
-        f: fn(f64) -> f64,
-        grad: fn(f64) -> f64,
+        f: fn(T) -> T,
+        grad: fn(T) -> T,
     ) -> Self {
         let name = format!("{}({})", name.as_ref(), self.0.name.clone());
         Self::new_payload(TermPayload::new(
@@ -336,9 +353,9 @@ impl RcTerm {
         ))
     }
 
-    pub fn set(&self, value: f64) -> Result<(), String> {
+    pub fn set(&self, value: T) -> Result<(), String> {
         if let TermInt::Value(ref rv) = self.0.value {
-            rv.set(value);
+            *rv.borrow_mut() = value;
             Ok(())
         } else {
             Err("Cannot set value to non-leaf nodes".into())
@@ -346,7 +363,7 @@ impl RcTerm {
     }
 
     /// Create a builder for dot file writer configuration.
-    pub fn dot_builder(&self) -> RcDotBuilder {
+    pub fn dot_builder(&self) -> RcDotBuilder<T> {
         RcDotBuilder {
             this: self.clone(),
             show_values: true,
@@ -355,28 +372,28 @@ impl RcTerm {
     }
 }
 
-struct DotEntry<'a> {
+struct DotEntry<'a, T: Tensor> {
     id: usize,
-    payload: &'a TermPayload,
+    payload: &'a TermPayload<T>,
     parents: Vec<usize>,
 }
 
 /// The dot file writer configuration builder with the builder pattern.
-pub struct RcDotBuilder {
-    this: RcTerm,
+pub struct RcDotBuilder<T: Tensor> {
+    this: RcTerm<T>,
     show_values: bool,
-    hilight: Option<RcTerm>,
+    hilight: Option<RcTerm<T>>,
 }
 
-impl RcDotBuilder {
+impl<T: Tensor> RcDotBuilder<T> {
     /// Set whether to show values and gradients of the terms on the node labels
-    pub fn show_values(mut self, v: bool) -> RcDotBuilder {
+    pub fn show_values(mut self, v: bool) -> Self {
         self.show_values = v;
         self
     }
 
     /// Set a term to show highlighted border around it.
-    pub fn highlights(mut self, term: RcTerm) -> RcDotBuilder {
+    pub fn highlights(mut self, term: RcTerm<T>) -> Self {
         self.hilight = Some(term);
         self
     }
@@ -390,9 +407,9 @@ impl RcDotBuilder {
             let DotEntry {
                 id, payload: term, ..
             } = entry;
-            let color = if term.grad.get().is_some() {
+            let color = if term.grad.borrow().is_some() {
                 "style=filled fillcolor=\"#ffff7f\""
-            } else if term.data.get().is_some() {
+            } else if term.data.borrow().is_some() {
                 "style=filled fillcolor=\"#7fff7f\""
             } else {
                 ""
@@ -410,11 +427,13 @@ impl RcDotBuilder {
                 format!(
                     "\\ndata:{}, grad:{}",
                     term.data
-                        .get()
+                        .borrow()
+                        .as_ref()
                         .map(|v| format!("{v}"))
                         .unwrap_or_else(|| "None".into()),
                     term.grad
-                        .get()
+                        .borrow()
+                        .as_ref()
                         .map(|v| format!("{v:0.2}"))
                         .unwrap_or_else(|| "None".into())
                 )
