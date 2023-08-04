@@ -6,6 +6,7 @@ fn main() {
     let tape = Tape::new();
     let (a, all) = build_model(&tape);
     let mut file = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
+    writeln!(file, "x, f(x), $df/dx$ (derive), $df/dx$ (backprop)").unwrap();
     for i in -40..=40 {
         let x = i as f64 / 20. * std::f64::consts::PI;
         a.set(x).unwrap();
