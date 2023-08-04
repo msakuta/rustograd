@@ -308,15 +308,28 @@ We can measure the performance of each type of terms.
 We tested with `RcTerm`, `TapeTerm<f64>` and `TapeTerm<MyTensor>`, where
 `MyTensor` is custom implementation of 1-D vector.
 
-The plot below shows comparison of each implementation in [rc_curve_fit](examples/rc_curve_fit.rs), [rc_tensor_curve_fit](examples/rc_tensor_curve_fit.rs), [tape_curve_fit](examples/tape_curve_fit.rs) and [tape_tensor_curve_fit](examples/tape_tensor_curve_fit.rs).
+The plot below shows comparison of various implementations.
+The codes are in [rc_curve_fit](examples/rc_curve_fit.rs), [rc_tensor_curve_fit](examples/rc_tensor_curve_fit.rs), [tape_curve_fit](examples/tape_curve_fit.rs) and [tape_tensor_curve_fit](examples/tape_tensor_curve_fit.rs).
+
+![term_perf](images/term_perf.png)
+
+* rc - `RcTerm`, with `Cell<f64>` as the payload
+* rc_refcell - `RcTerm<f64>`, with `RefCell<f64>` as the payload
+* rc_tensor - `RcTerm<MyTensor>`, with `RefCell<MyTensor>` with 80 elements as the payload
+* tape - `TapeTerm`, with `f64` as the payload
+* tape_tensor - `TapeTerm<MyTensor>`, with `MyTensor` with 80 elements as the payload
+* tape2 - same as tape, except improved backprop strategy (rolling tape)
+* tape2_tensor - same as tape_tensor, except improved backprop strategy (rolling tape)
+
 The difference between `rc` and `rc_refcell` is that the former uses `Cell` as the container of the value, while the latter uses `RefCell`.
 If the value is a `Copy`, we could use `Cell` and there is no overhead in runtime borrow checking, but if it was not a `Copy`, we have to use `RefCell` to update it.
 A tensor is (usually) not a copy, so we have to use `RefCell`, so I was interested in the overhead.
-
-![term_perf](images/term_perf.png)
 
 As you can see, `TapeTerm<f64>` is faster than `RcTerm<f64>`.
 Also, the performance gain by changing from `f64` (scalar) to `MyTensor` is greater than the introduction of `RefCell`, and it is almost the same between `RcTerm<MyTensor>` and `TapeTerm<MyTensor>`.
 
 It indicates that even though `MyTensor` uses additional heap memory allocation, it is still faster to aggregate operation in an expression, rather than scanning the scalar value and evaluating each of them.
 Next step is to investigate if using a memory arena for the contents of the tensor helps further.
+
+On top of that, utilizing the tape's property that every variable has no dependencies after that node makes it possible to "roll" the tape and calculate differentials in one evaluation per node.
+It improves the performance even further by removing redundant visits.
