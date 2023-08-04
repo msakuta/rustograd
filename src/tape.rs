@@ -246,8 +246,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn backprop(&self) -> Result<(), ValueNotDefinedError> {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
-        backprop_rec(&mut nodes, self.idx, T::one(), callback)
+        backprop_rec(&mut nodes, self.idx, &|_, _| ())
     }
 
     pub fn backprop_cb(
@@ -256,7 +255,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     ) -> Result<(), ValueNotDefinedError> {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
-        backprop_rec(&mut nodes, self.idx, T::one(), Some(callback))
+        backprop_rec(&mut nodes, self.idx, callback)
     }
 
     /// Write graphviz dot file to the given writer.
@@ -353,48 +352,58 @@ fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
     }
 }
 
-/// Assign gradient to all nodes
-fn backprop_rec<T: Tensor>(
+fn backprop_set<T: Tensor>(
     nodes: &mut [TapeNode<T>],
     idx: u32,
     grad: T,
-    callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
-) -> Result<(), ValueNotDefinedError> {
-    use TapeValue::*;
+    callback: &impl Fn(&[TapeNode<T>], u32),
+) {
     if let Some(ref mut node_grad) = nodes[idx as usize].grad {
         *node_grad += grad.clone();
     } else {
         nodes[idx as usize].grad = Some(grad.clone());
     }
-    if let Some(callback) = callback {
-        callback(nodes, idx);
-    }
-    match nodes[idx as usize].value {
-        Value(_) => (),
-        Add(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone(), callback)?;
-            backprop_rec(nodes, rhs, grad.clone(), callback)?;
-        }
-        Sub(lhs, rhs) => {
-            backprop_rec(nodes, lhs, grad.clone(), callback)?;
-            backprop_rec(nodes, rhs, -grad, callback)?;
-        }
-        Mul(lhs, rhs) => {
-            let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
-            let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, lhs, grad.clone() * erhs, callback)?;
-            backprop_rec(nodes, rhs, grad * elhs, callback)?;
-        }
-        Div(lhs, rhs) => {
-            let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
-            let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, lhs, grad.clone() / erhs.clone(), callback)?;
-            backprop_rec(nodes, rhs, -grad * elhs / erhs.clone() / erhs, callback)?;
-        }
-        Neg(term) => backprop_rec(nodes, term, -grad, callback)?,
-        UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
-            let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
-            backprop_rec(nodes, term, grad * g(val), callback)?
+    callback(nodes, idx);
+}
+
+/// Assign gradient to all nodes
+fn backprop_rec<T: Tensor>(
+    nodes: &mut [TapeNode<T>],
+    idx: u32,
+    callback: &impl Fn(&[TapeNode<T>], u32),
+) -> Result<(), ValueNotDefinedError> {
+    use TapeValue::*;
+    nodes[idx as usize].grad = Some(T::one());
+    callback(nodes, idx);
+    for i in (0..=idx).rev() {
+        let grad = nodes[i as usize].grad.as_ref().unwrap().clone();
+        match nodes[i as usize].value {
+            Value(_) => (),
+            Add(lhs, rhs) => {
+                backprop_set(nodes, lhs, grad.clone(), callback);
+                backprop_set(nodes, rhs, grad, callback);
+            }
+            Sub(lhs, rhs) => {
+                backprop_set(nodes, lhs, grad.clone(), callback);
+                backprop_set(nodes, rhs, -grad, callback);
+            }
+            Mul(lhs, rhs) => {
+                let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+                backprop_set(nodes, lhs, grad.clone() * erhs, callback);
+                backprop_set(nodes, rhs, grad * elhs, callback);
+            }
+            Div(lhs, rhs) => {
+                let erhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let elhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+                backprop_set(nodes, lhs, grad.clone() / erhs.clone(), callback);
+                backprop_set(nodes, rhs, -grad * elhs / erhs.clone() / erhs, callback);
+            }
+            Neg(term) => backprop_set(nodes, term, -grad, callback),
+            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+                let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
+                backprop_set(nodes, term, grad * g(val), callback)
+            }
         }
     }
     Ok(())
