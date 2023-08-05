@@ -1,11 +1,11 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     io::Write,
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
 };
 
-use crate::tensor::Tensor;
+use crate::{error::ValueNotDefinedError, tensor::Tensor};
 
 #[derive(Clone)]
 struct UnaryFnPayload<T: Tensor> {
@@ -243,9 +243,24 @@ impl<T: Tensor> RcTerm<T> {
         };
     }
 
-    /// Assign gradient to all nodes
-    fn backprop_rec(&self, grad: &T, callback: &impl Fn(RcTerm<T>)) {
+    fn backprop_accum(&self, list: &mut Vec<RcTerm<T>>) {
         use TermInt::*;
+        match &self.0.value {
+            Value(_) => (),
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
+                lhs.backprop_accum(list);
+                rhs.backprop_accum(list);
+            }
+            Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => {
+                term.backprop_accum(list);
+            }
+        }
+        if !list.iter().any(|rc| rc.id() == self.id()) {
+            list.push(self.clone());
+        }
+    }
+
+    fn backprop_node(&self, grad: &T, callback: &impl Fn(RcTerm<T>)) {
         {
             let mut borrow = self.0.grad.borrow_mut();
             let grad_val =
@@ -253,44 +268,61 @@ impl<T: Tensor> RcTerm<T> {
             *borrow = Some(grad_val);
         }
         callback(self.clone());
-        let null_callback = |_| ();
-        match &self.0.value {
-            Value(_) => (),
-            Add(lhs, rhs) => {
-                lhs.backprop_rec(grad, callback);
-                rhs.backprop_rec(grad, callback);
-            }
-            Sub(lhs, rhs) => {
-                lhs.backprop_rec(grad, callback);
-                rhs.backprop_rec(&-grad.clone(), callback);
-            }
-            Mul(lhs, rhs) => {
-                lhs.backprop_rec(&(grad.clone() * rhs.eval_int(&null_callback)), callback);
-                rhs.backprop_rec(&(grad.clone() * lhs.eval_int(&null_callback)), callback);
-            }
-            Div(lhs, rhs) => {
-                let erhs = rhs.eval_int(&null_callback);
-                let elhs = lhs.eval_int(&null_callback);
-                lhs.backprop_rec(&(grad.clone() / erhs.clone()), callback);
-                rhs.backprop_rec(&(-grad.clone() * elhs / erhs.clone() / erhs), callback);
-            }
-            Neg(term) => term.backprop_rec(&-grad.clone(), callback),
-            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
-                let val = term.eval_int(&null_callback);
-                term.backprop_rec(&(grad.clone() * g(val)), callback);
+    }
+
+    /// Assign gradient to all nodes
+    fn backprop_rec(
+        list: &[RcTerm<T>],
+        callback: &impl Fn(RcTerm<T>),
+    ) -> Result<(), ValueNotDefinedError> {
+        use TermInt::*;
+        for node in list.iter().rev() {
+            let null_callback = |_| ();
+            let borrow = node.0.grad.borrow();
+            let grad = borrow.as_ref().ok_or(ValueNotDefinedError)?;
+            match &node.0.value {
+                Value(_) => (),
+                Add(lhs, rhs) => {
+                    lhs.backprop_node(grad, callback);
+                    rhs.backprop_node(grad, callback);
+                }
+                Sub(lhs, rhs) => {
+                    lhs.backprop_node(grad, callback);
+                    rhs.backprop_node(&-grad.clone(), callback);
+                }
+                Mul(lhs, rhs) => {
+                    lhs.backprop_node(&(grad.clone() * rhs.eval_int(&null_callback)), callback);
+                    rhs.backprop_node(&(grad.clone() * lhs.eval_int(&null_callback)), callback);
+                }
+                Div(lhs, rhs) => {
+                    let erhs = rhs.eval_int(&null_callback);
+                    let elhs = lhs.eval_int(&null_callback);
+                    lhs.backprop_node(&(grad.clone() / erhs.clone()), callback);
+                    rhs.backprop_node(&(-grad.clone() * elhs / erhs.clone() / erhs), callback);
+                }
+                Neg(term) => term.backprop_node(&-grad.clone(), callback),
+                UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+                    let val = term.eval_int(&null_callback);
+                    term.backprop_node(&(grad.clone() * g(val)), callback);
+                }
             }
         }
+        Ok(())
     }
 
     /// The entry point to backpropagation
-    pub fn backprop(&self) {
-        self.backprop_cb(&|_| ());
+    pub fn backprop(&self) -> Result<(), ValueNotDefinedError> {
+        self.backprop_cb(&|_| ())
     }
 
     /// Backpropagation with a callback for each visited node
-    pub fn backprop_cb(&self, callback: &impl Fn(RcTerm<T>)) {
+    pub fn backprop_cb(&self, callback: &impl Fn(RcTerm<T>)) -> Result<(), ValueNotDefinedError> {
         self.clear_grad();
-        self.backprop_rec(&T::one(), callback);
+        let mut list = vec![];
+        self.backprop_accum(&mut list);
+        self.backprop_node(&T::one(), callback);
+        Self::backprop_rec(&list, callback)?;
+        Ok(())
     }
 
     /// Evaluate value with possibly updated value by [`set`]

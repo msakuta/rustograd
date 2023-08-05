@@ -16,7 +16,7 @@ fn main() {
     }
     x.set(0.).unwrap();
     all.eval();
-    all.backprop();
+    all.backprop().unwrap();
     all.dot(&mut std::io::stdout()).unwrap();
 }
 

@@ -23,7 +23,7 @@ fn main() {
     };
 
     abac.eval_cb(&callback);
-    abac.backprop_cb(&callback);
+    abac.backprop_cb(&callback).unwrap();
     println!("abac: {}", abac.grad());
     println!("a: {}", a.grad());
     println!("b: {}", b.grad());

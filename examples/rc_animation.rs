@@ -33,6 +33,6 @@ fn main() {
     };
     abc.eval_cb(&callback);
 
-    abc.backprop_cb(&callback);
+    abc.backprop_cb(&callback).unwrap();
     abc.dot(&mut std::io::stdout()).unwrap();
 }
