@@ -126,11 +126,26 @@ fn main() {
         )
         .unwrap();
     }
+
+    let counter = std::cell::Cell::new(0);
+    let callback = |nodes: &_, idx| {
+        let i = counter.get();
+        let mut file =
+            std::io::BufWriter::new(std::fs::File::create(format!("dot{i}.dot")).unwrap());
+        model.loss.dot_builder()
+            .show_values(false)
+            .vertical(true)
+            .highlights(idx)
+            .dot_borrowed(nodes, &mut file)
+            .unwrap();
+        counter.set(i + 1);
+    };
+
     model.x.set(0.).unwrap();
-    model.y.eval();
-    model.y.backprop().unwrap();
+    model.loss.eval_cb(&callback);
+    model.loss.backprop_cb(&callback).unwrap();
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    model.y.dot(&mut dotfile).unwrap();
+    model.loss.dot_builder().vertical(true).dot(&mut dotfile).unwrap();
 }
 
 struct Model<'a> {
