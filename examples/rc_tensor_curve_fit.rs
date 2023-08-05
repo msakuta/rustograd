@@ -154,7 +154,7 @@ fn main() {
         model.x.set(MyTensor(samples.clone())).unwrap();
         model.sample_y.set(MyTensor(truth_data.clone())).unwrap();
         model.loss.eval();
-        model.loss.backprop();
+        model.loss.backprop().unwrap();
         *mu -= RATE * model.mu.grad().0.iter().sum::<f64>();
         *sigma -= RATE * model.sigma.grad().0.iter().sum::<f64>();
         *scale -= RATE * model.scale.grad().0.iter().sum::<f64>();
@@ -222,7 +222,7 @@ fn main() {
     model.loss.clear();
     model.loss.clear_grad();
     model.loss.eval_cb(&callback);
-    model.loss.backprop_cb(&callback);
+    model.loss.backprop_cb(&callback).unwrap();
     let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
     model
         .loss
