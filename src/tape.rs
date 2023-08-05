@@ -28,6 +28,7 @@ struct UnaryFnPayload<T> {
     term: u32,
     f: fn(T) -> T,
     grad: fn(T) -> T,
+    grad2: fn(T) -> T,
 }
 
 #[derive(Clone, Debug)]
@@ -216,11 +217,22 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         }
     }
 
+    /// One-time second-order derivation. Does not update internal gradient values.
+    pub fn derive2(&self, var: &Self) -> Option<T> {
+        if self.idx == var.idx {
+            Some(T::default())
+        } else {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            derive2(&mut nodes, self.idx, var.idx)
+        }
+    }
+
     pub fn apply(
         &self,
         name: &(impl AsRef<str> + ?Sized),
         f: fn(T) -> T,
         grad: fn(T) -> T,
+        grad2: fn(T) -> T,
     ) -> Self {
         let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
         let name = format!("{}({})", name.as_ref(), self_name);
@@ -230,6 +242,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
                 term: self.idx,
                 f,
                 grad,
+                grad2,
             }),
         )
     }
@@ -347,6 +360,104 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
     };
     Some(grad)
 }
+
+fn derive2<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T> {
+    use TapeValue::*;
+    // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
+    let grad = match nodes[idx as usize].value {
+        Value(_) => {
+            if idx == wrt {
+                T::one()
+            } else {
+                T::default()
+            }
+        }
+        Add(lhs, rhs) => derive2(nodes, lhs, wrt)? + derive2(nodes, rhs, wrt)?,
+        Sub(lhs, rhs) => derive2(nodes, lhs, wrt)? + derive2(nodes, rhs, wrt)?,
+        Mul(lhs, rhs) => {
+            let dlhs = derive(nodes, lhs, wrt)?;
+            let drhs = derive(nodes, rhs, wrt)?;
+            let d2lhs = derive2(nodes, lhs, wrt)?;
+            let d2rhs = derive2(nodes, rhs, wrt)?;
+            let vrhs = value(nodes, rhs)?;
+            let vlhs = value(nodes, lhs)?;
+            d2lhs * vrhs + vlhs * d2rhs + dlhs.clone() * drhs.clone() + dlhs * drhs
+        }
+        Div(lhs, rhs) => {
+            let dlhs = derive(nodes, lhs, wrt)?;
+            let drhs = derive(nodes, rhs, wrt)?;
+            let d2lhs = derive2(nodes, lhs, wrt)?;
+            let d2rhs = derive2(nodes, rhs, wrt)?;
+            let vlhs = value(nodes, lhs)?;
+            let vrhs = value(nodes, rhs)?;
+            (vlhs.clone() + vlhs.clone()) / vrhs.clone() / vrhs.clone() / vrhs.clone()
+                * drhs.clone()
+                - T::one() / vrhs.clone() / vrhs.clone() * dlhs.clone() * drhs.clone()
+                - vlhs / vrhs.clone() / vrhs.clone() * d2rhs
+                - T::one() / vrhs.clone() / vrhs.clone() * dlhs
+                + T::one() / vrhs * d2lhs
+        }
+        Neg(term) => -derive2(nodes, term, wrt)?,
+        UnaryFn(UnaryFnPayload { term, grad2, .. }) => {
+            grad2(value(nodes, term)?) * derive2(nodes, term, wrt)?
+        }
+    };
+    Some(grad)
+}
+
+// fn derive_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Option<u32> {
+//     use TapeValue::*;
+//     // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
+
+//     let new_node = match nodes[idx as usize].value {
+//         Value(_) => {
+//             if idx == wrt {
+//                 let new_idx = nodes.len();
+//                 let name = nodes[idx as usize].name + "'";
+//                 nodes.push(TapeNode {
+//                     name: name.into(),
+//                     value: TapeValue::UnaryFn(UnaryFnPayload { term: idx, f: |id| id, grad: |id| id }),
+//                     data: None,
+//                     grad: None,
+//                 });
+//                 Some(new_idx)
+//             } else {
+//                 None
+//             }
+//         }
+//         Add(lhs, rhs) => {
+//             if let Some(lhs) = derive_graph(nodes, lhs, wrt) {
+//                 let new_idx = nodes.len();
+//                 let name = nodes[idx as usize].name + "'";
+//                 nodes.push(TapeNode {
+//                     name: name.into(),
+//                     value: TapeValue::Add(lhs, rhs),
+//                     data: None,
+//                     grad: None,
+//                 });
+//                 Some(new_idx)
+//             } + derive_graph(nodes, rhs, wrt)?
+//         }
+//         Sub(lhs, rhs) => derive(nodes, lhs, wrt)? - derive(nodes, rhs, wrt)?,
+//         Mul(lhs, rhs) => {
+//             let dlhs = derive(nodes, lhs, wrt)?;
+//             let drhs = derive(nodes, rhs, wrt)?;
+//             dlhs * value(nodes, rhs)? + value(nodes, lhs)? * drhs
+//         }
+//         Div(lhs, rhs) => {
+//             let dlhs = derive(nodes, lhs, wrt)?;
+//             let drhs = derive(nodes, rhs, wrt)?;
+//             let elhs = value(nodes, lhs)?;
+//             let erhs = value(nodes, rhs)?;
+//             dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
+//         }
+//         Neg(term) => -derive(nodes, term, wrt)?,
+//         UnaryFn(UnaryFnPayload { term, grad, .. }) => {
+//             grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+//         }
+//     };
+//     Some(grad)
+// }
 
 fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
     for node in nodes {
