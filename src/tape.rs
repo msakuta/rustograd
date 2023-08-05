@@ -365,15 +365,9 @@ fn derive2<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T
     use TapeValue::*;
     // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
     let grad = match nodes[idx as usize].value {
-        Value(_) => {
-            if idx == wrt {
-                T::one()
-            } else {
-                T::default()
-            }
-        }
+        Value(_) => T::default(),
         Add(lhs, rhs) => derive2(nodes, lhs, wrt)? + derive2(nodes, rhs, wrt)?,
-        Sub(lhs, rhs) => derive2(nodes, lhs, wrt)? + derive2(nodes, rhs, wrt)?,
+        Sub(lhs, rhs) => derive2(nodes, lhs, wrt)? - derive2(nodes, rhs, wrt)?,
         Mul(lhs, rhs) => {
             let dlhs = derive(nodes, lhs, wrt)?;
             let drhs = derive(nodes, rhs, wrt)?;
@@ -381,7 +375,8 @@ fn derive2<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T
             let d2rhs = derive2(nodes, rhs, wrt)?;
             let vrhs = value(nodes, rhs)?;
             let vlhs = value(nodes, lhs)?;
-            d2lhs * vrhs + vlhs * d2rhs + dlhs.clone() * drhs.clone() + dlhs * drhs
+            let cross = dlhs * drhs;
+            d2lhs * vrhs + vlhs * d2rhs + cross.clone() + cross
         }
         Div(lhs, rhs) => {
             let dlhs = derive(nodes, lhs, wrt)?;
@@ -398,8 +393,12 @@ fn derive2<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T
                 + T::one() / vrhs * d2lhs
         }
         Neg(term) => -derive2(nodes, term, wrt)?,
-        UnaryFn(UnaryFnPayload { term, grad2, .. }) => {
-            grad2(value(nodes, term)?) * derive2(nodes, term, wrt)?
+        UnaryFn(UnaryFnPayload {
+            term, grad, grad2, ..
+        }) => {
+            let val = value(nodes, term)?;
+            let dval = derive(nodes, term, wrt)?;
+            grad2(val.clone()) * dval.clone() * dval + grad(val) * derive2(nodes, term, wrt)?
         }
     };
     Some(grad)
