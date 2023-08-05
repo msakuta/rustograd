@@ -214,7 +214,12 @@ fn main() {
         let i = counter.get();
         let mut file =
             std::io::BufWriter::new(std::fs::File::create(format!("dot{i}.dot")).unwrap());
-        model.loss.dot(&mut file).unwrap();
+        model
+            .loss
+            .dot_builder()
+            .show_values(false)
+            .dot(&mut file)
+            .unwrap();
         counter.set(i + 1);
     };
 
