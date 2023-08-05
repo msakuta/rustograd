@@ -1,8 +1,8 @@
 use std::{
-    cell::{Cell, RefCell},
+    cell::RefCell,
     io::Write,
     ops::{Add, Div, Mul, Sub},
-    rc::Rc,
+    rc::{Rc, Weak}, borrow::BorrowMut,
 };
 
 use crate::tensor::Tensor;
@@ -44,6 +44,7 @@ struct TermPayload<T: Tensor> {
     value: TermInt<T>,
     data: RefCell<Option<T>>,
     grad: RefCell<Option<T>>,
+    back: Option<Rc<RefCell<Vec<Weak<TermPayload<T>>>>>>,
 }
 
 impl<T: Tensor> TermPayload<T> {
@@ -54,6 +55,7 @@ impl<T: Tensor> TermPayload<T> {
             value,
             data: RefCell::new(Some(data)),
             grad: RefCell::new(None),
+            back: None,
         }
     }
 }
@@ -109,7 +111,7 @@ impl<T: Tensor> Add for &RcTerm<T> {
         RcTerm::new_payload(TermPayload::new(
             name,
             TermInt::Add(self.clone(), rhs.clone()),
-        ))
+        ), self.back_buffer())
     }
 }
 
@@ -120,7 +122,7 @@ impl<T: Tensor> Sub for &RcTerm<T> {
         RcTerm::new_payload(TermPayload::new(
             name,
             TermInt::Sub(self.clone(), rhs.clone()),
-        ))
+        ), self.back_buffer())
     }
 }
 
@@ -131,7 +133,7 @@ impl<T: Tensor> Mul for &RcTerm<T> {
         RcTerm::new_payload(TermPayload::new(
             name,
             TermInt::Mul(self.clone(), rhs.clone()),
-        ))
+        ), self.back_buffer())
     }
 }
 
@@ -142,7 +144,7 @@ impl<T: Tensor> Div for &RcTerm<T> {
         RcTerm::new_payload(TermPayload::new(
             name,
             TermInt::Div(self.clone(), rhs.clone()),
-        ))
+        ), self.back_buffer())
     }
 }
 
@@ -150,7 +152,7 @@ impl<T: Tensor> std::ops::Neg for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn neg(self) -> Self::Output {
         let name = format!("-{}", self.0.name);
-        RcTerm::new_payload(TermPayload::new(name, TermInt::Neg(self.clone())))
+        RcTerm::new_payload(TermPayload::new(name, TermInt::Neg(self.clone())), self.back_buffer())
     }
 }
 
@@ -162,8 +164,12 @@ impl<T: Tensor> RcTerm<T> {
         )))
     }
 
-    fn new_payload(val: TermPayload<T>) -> Self {
-        Self(Rc::new(val))
+    fn new_payload(mut val: TermPayload<T>, back: Rc<RefCell<Vec<Weak<TermPayload<T>>>>>) -> Self {
+        val.back = Some(back.clone());
+        println!("back: {}", back.borrow().len());
+        let ret = Self(Rc::new(val));
+        RefCell::borrow_mut(&back).push(Rc::downgrade(&ret.0));
+        ret
     }
 
     pub fn grad(&self) -> T {
@@ -178,6 +184,10 @@ impl<T: Tensor> RcTerm<T> {
     fn id(&self) -> usize {
         let payload = &*self.0;
         payload as *const _ as usize
+    }
+
+    fn back_buffer(&self) -> Rc<RefCell<Vec<Weak<TermPayload<T>>>>> {
+        self.0.back.clone().unwrap_or_else(|| Rc::new(RefCell::new(vec![])))
     }
 
     fn accum<'a>(&'a self, map: &mut Vec<DotEntry<'a, T>>) {
@@ -350,7 +360,7 @@ impl<T: Tensor> RcTerm<T> {
                 f,
                 grad,
             }),
-        ))
+        ), self.back_buffer())
     }
 
     pub fn set(&self, value: T) -> Result<(), String> {
