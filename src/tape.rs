@@ -202,6 +202,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn eval_cb(&self, callback: &impl Fn(&[TapeNode<T>], u32)) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear(&mut nodes);
+        clear_grad(&mut nodes);
         eval(&mut nodes, self.idx, Some(callback))
     }
 
@@ -268,6 +269,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         TapeDotBuilder {
             this: *self,
             show_values: false,
+            vertical: false,
             hilight: None,
         }
     }
@@ -413,6 +415,7 @@ fn backprop_rec<T: Tensor>(
 pub struct TapeDotBuilder<'a, T: Default> {
     this: TapeTerm<'a, T>,
     show_values: bool,
+    vertical: bool,
     hilight: Option<u32>,
 }
 
@@ -420,6 +423,11 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Set whether to show values and gradients of the terms on the node labels
     pub fn show_values(mut self, v: bool) -> Self {
         self.show_values = v;
+        self
+    }
+
+    pub fn vertical(mut self, v: bool) -> Self {
+        self.vertical = v;
         self
     }
 
@@ -440,7 +448,11 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
         nodes: &[TapeNode<T>],
         writer: &mut impl Write,
     ) -> std::io::Result<()> {
-        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
+        writeln!(
+            writer,
+            "digraph G {{\nrankdir=\"{}\";",
+            if self.vertical { "TB" } else { "LR" }
+        )?;
         for (id, term) in nodes.iter().enumerate() {
             let color = if term.grad.is_some() {
                 "style=filled fillcolor=\"#ffff7f\""
