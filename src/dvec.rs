@@ -1,15 +1,17 @@
 use std::collections::VecDeque;
 
+use crate::Tensor;
+
 #[derive(Clone, PartialEq, Debug)]
 /// A dynamic dual number of arbitrary order, translated from C++ in a paper [^1]
 ///
 /// [^1]: Higher Order Automatic Differentiation with Dual Numbers (doi: https://doi.org/10.3311/PPee.16341)
-pub struct Dvec(VecDeque<f64>);
+pub struct Dvec<T = f64>(VecDeque<T>);
 
-impl Dvec {
-    pub fn new_n(v: f64, d: f64, n: usize) -> Self {
+impl<T: Tensor> Dvec<T> {
+    pub fn new_n(v: T, d: T, n: usize) -> Self {
         let mut f = VecDeque::new();
-        f.resize(n + 1, 0.);
+        f.resize(n + 1, T::default());
         f[0] = v;
         if n >= 1 {
             f[1] = d
@@ -17,7 +19,7 @@ impl Dvec {
         Self(f)
     }
 
-    fn new(v: f64, mut d: Dvec) -> Self {
+    fn new(v: T, mut d: Self) -> Self {
         d.0.push_front(v);
         d
     }
@@ -26,20 +28,54 @@ impl Dvec {
         self.0.len() == 1
     }
 
-    fn F(&self) -> Dvec {
+    fn F(&self) -> Self {
         // Front operator
         let mut ffront = self.clone();
         ffront.0.pop_back();
         ffront
     }
 
-    fn D(&self) -> Dvec {
+    fn D(&self) -> Self {
         // Derivation operator
         let mut fback = self.clone();
         fback.0.pop_front();
         fback
     }
 
+    /// Apply a function with arbitrary number of derivatives.
+    /// You need to have a function that can be derived infinite times.
+    /// The second argument to the function is the order of differentiation
+    ///
+    /// # Example
+    ///
+    /// ```
+    /// d1.apply(|x, n| {
+    ///     match n % 4 {
+    ///         0 => x.sin(),
+    ///         1 => x.cos(),
+    ///         2 => -x.sin(),
+    ///         3 => -x.cos(),
+    ///         _ => unreachable!(),
+    ///     }
+    /// });
+    /// ```
+    pub fn apply(&self, f: fn(T, usize) -> T) -> Self {
+        self.apply_rec(f, 0)
+    }
+
+    fn apply_rec(&self, f: fn(T, usize) -> T, n: usize) -> Self {
+        if self.is_real() {
+            single(f(self.0[0].clone(), n))
+        } else {
+            Self::new(
+                f(self.0[0].clone(), n),
+                &self.F().apply_rec(f, n + 1) * &self.D(),
+            )
+        }
+    }
+}
+
+impl Dvec<f64> {
     pub fn cos(&self) -> Self {
         if self.is_real() {
             single(self.0[0].cos())
@@ -65,8 +101,8 @@ impl Dvec {
     }
 }
 
-fn single(e: f64) -> Dvec {
-    Dvec::new_n(e, 0., 0)
+fn single<T: Tensor>(e: T) -> Dvec<T> {
+    Dvec::new_n(e, T::default(), 0)
 }
 
 impl std::fmt::Display for Dvec {
@@ -87,61 +123,61 @@ impl std::ops::Index<usize> for Dvec {
     }
 }
 
-impl std::ops::Add for &Dvec {
-    type Output = Dvec;
-    fn add(self, rhs: &Dvec) -> Self::Output {
+impl<T: Tensor> std::ops::Add for &Dvec<T> {
+    type Output = Dvec<T>;
+    fn add(self, rhs: &Dvec<T>) -> Self::Output {
         if self.is_real() || rhs.is_real() {
-            single(self.0[0] + rhs.0[0])
+            single(self.0[0].clone() + rhs.0[0].clone())
         } else {
-            Dvec::new(self.0[0] + rhs.0[0], &self.D() + &rhs.D())
+            Dvec::new(self.0[0].clone() + rhs.0[0].clone(), &self.D() + &rhs.D())
         }
     }
 }
 
-impl std::ops::Sub for &Dvec {
-    type Output = Dvec;
-    fn sub(self, rhs: &Dvec) -> Self::Output {
+impl<T: Tensor> std::ops::Sub for &Dvec<T> {
+    type Output = Dvec<T>;
+    fn sub(self, rhs: &Dvec<T>) -> Self::Output {
         if self.is_real() || rhs.is_real() {
-            single(self.0[0] - rhs.0[0])
+            single(self.0[0].clone() - rhs.0[0].clone())
         } else {
-            Dvec::new(self.0[0] - rhs.0[0], &self.D() - &rhs.D())
+            Dvec::new(self.0[0].clone() - rhs.0[0].clone(), &self.D() - &rhs.D())
         }
     }
 }
 
-impl std::ops::Mul for &Dvec {
-    type Output = Dvec;
-    fn mul(self, rhs: &Dvec) -> Self::Output {
+impl<T: Tensor> std::ops::Mul for &Dvec<T> {
+    type Output = Dvec<T>;
+    fn mul(self, rhs: &Dvec<T>) -> Self::Output {
         if self.is_real() || rhs.is_real() {
-            single(self.0[0] * rhs.0[0])
+            single(self.0[0].clone() * rhs.0[0].clone())
         } else {
             Dvec::new(
-                self.0[0] * rhs.0[0],
+                self.0[0].clone() * rhs.0[0].clone(),
                 &(&self.D() * &rhs.F()) + &(&self.F() * &rhs.D()),
             )
         }
     }
 }
 
-impl std::ops::Div for Dvec {
-    type Output = Self;
-    fn div(self, rhs: Dvec) -> Dvec {
+impl<T: Tensor> std::ops::Div for Dvec<T> {
+    type Output = Dvec<T>;
+    fn div(self, rhs: Dvec<T>) -> Self::Output {
         if self.is_real() || rhs.is_real() {
-            single(self.0[0] / rhs.0[0])
+            single(self.0[0].clone() / rhs.0[0].clone())
         } else {
             Dvec::new(
-                self.0[0] / rhs.0[0],
+                self.0[0].clone() / rhs.0[0].clone(),
                 (&(&self.D() * &rhs) - &(&self * &rhs.D())) / (&rhs * &rhs),
             )
         }
     }
 }
 
-impl std::ops::Neg for &Dvec {
-    type Output = Dvec;
+impl<T: Tensor> std::ops::Neg for &Dvec<T> {
+    type Output = Dvec<T>;
     fn neg(self) -> Self::Output {
         let mut ret = self.clone();
-        ret.0.iter_mut().for_each(|v| *v = -*v);
+        ret.0.iter_mut().for_each(|v| *v = -std::mem::take(v));
         ret
     }
 }
