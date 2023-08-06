@@ -1,8 +1,6 @@
-
-
 #[derive(Clone, Copy, PartialEq, Debug)]
 /// An implementation of order N dual nuumber, translated from C++ in a paper [^1]
-/// 
+///
 /// [^1]: Higher Order Automatic Differentiation with Dual Numbers (doi: https://doi.org/10.3311/PPee.16341)
 pub struct Dnum<const N: usize> {
     f: [f64; N], // value and derivatives
