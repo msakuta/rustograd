@@ -187,6 +187,17 @@ fn sin(x: f64) -> f64 { x.sin() }
 fn sin_derive(x: f64) -> f64 { x.cos() }
 ```
 
+## `Dvec` type for higher order differentiation
+
+`*Term` types do not support higher order differentiation. It's hard to support them in reverse-mode automatic differentiation, and they require a buffer size proportional to the maximum order of differentiation you would want to calculate, so it is inefficient to allocate memory for all of them.
+
+This library provides with `Dvec` type, which is a direct translation from a paper [^1].
+
+[^1]: [Higher Order Automatic Differentiation with Dual Numbers](https://pp.bme.hu/eecs/article/download/16341/8918/87511)
+
+You can find a usage example [with scalars](examples/dvec.rs) and [with tensors](examples/dvec_tensor.rs) in the examples directory.
+
+
 ## Example applications
 
 In the following examples, I use `TapeTerm` because it is expected to be the most efficient one in complex expressions.
