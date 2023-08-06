@@ -116,8 +116,8 @@ impl std::fmt::Display for Dvec {
     }
 }
 
-impl std::ops::Index<usize> for Dvec {
-    type Output = f64;
+impl<T: Tensor> std::ops::Index<usize> for Dvec<T> {
+    type Output = T;
     fn index(&self, index: usize) -> &Self::Output {
         &self.0[index]
     }
