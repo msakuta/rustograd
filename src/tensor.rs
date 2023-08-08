@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::HStack;
+
 /// A trait that represents a type that can be used as a value in this library.
 ///
 /// An implementation for f64 is provided by the crate, but you can implement it for
@@ -23,6 +25,9 @@ pub trait Tensor:
 {
     fn one() -> Self;
     fn is_zero(&self) -> bool;
+    fn hstack(self, _rhs: Self) -> Option<Self> {
+        None
+    }
 }
 
 impl Tensor for f64 {

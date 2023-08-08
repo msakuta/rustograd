@@ -38,6 +38,24 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
     }
 }
 
+#[derive(Clone)]
+struct BinaryFnPayload<T> {
+    lhs: u32,
+    rhs: u32,
+    f: Rc<dyn Fn(T, T) -> T>,
+    /// In binary function, differentiation can be performed to both operands.
+    grad: Rc<dyn Fn(T, T) -> (T, T)>,
+}
+
+impl<T> std::fmt::Debug for BinaryFnPayload<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("BinaryFnPayload")
+            .field("lhs", &self.lhs)
+            .field("rhs", &self.rhs)
+            .finish()
+    }
+}
+
 #[derive(Clone, Debug)]
 enum TapeValue<T> {
     Value(T),
@@ -47,6 +65,7 @@ enum TapeValue<T> {
     Div(u32, u32),
     Neg(u32),
     UnaryFn(UnaryFnPayload<T>),
+    BinaryFn(BinaryFnPayload<T>),
     HStack(u32, u32),
 }
 
@@ -119,6 +138,15 @@ impl<T: Tensor> Tape<T> {
 
     fn term_name<'a>(&'a self, name: impl Into<String>, value: TapeValue<T>) -> TapeTerm<'a, T> {
         let mut nodes = self.nodes.borrow_mut();
+        self.term_name_borrowed(&mut nodes, name, value)
+    }
+
+    fn term_name_borrowed<'a>(
+        &'a self,
+        nodes: &mut Vec<TapeNode<T>>,
+        name: impl Into<String>,
+        value: TapeValue<T>,
+    ) -> TapeTerm<'a, T> {
         let idx = nodes.len();
         nodes.push(TapeNode {
             name: name.into(),
@@ -204,7 +232,7 @@ impl<'a, T: Tensor> std::ops::Neg for TapeTerm<'a, T> {
     }
 }
 
-impl<'a, T: Tensor + HStack + 'static> TapeTerm<'a, T> {
+impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear(&mut nodes);
@@ -246,6 +274,26 @@ impl<'a, T: Tensor + HStack + 'static> TapeTerm<'a, T> {
             name,
             TapeValue::UnaryFn(UnaryFnPayload {
                 term: self.idx,
+                f: Rc::new(f),
+                grad: Rc::new(grad),
+            }),
+        )
+    }
+
+    pub fn apply_binary(
+        &self,
+        name: &(impl AsRef<str> + ?Sized),
+        rhs: TapeTerm<T>,
+        f: impl Fn(T, T) -> T + 'static,
+        grad: impl Fn(T, T) -> (T, T) + 'static,
+    ) -> Self {
+        let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        let name = format!("{}({})", name.as_ref(), self_name);
+        self.tape.term_name(
+            name,
+            TapeValue::BinaryFn(BinaryFnPayload {
+                lhs: self.idx,
+                rhs: rhs.idx,
                 f: Rc::new(f),
                 grad: Rc::new(grad),
             }),
@@ -303,7 +351,7 @@ fn clear<T: Tensor>(nodes: &mut [TapeNode<T>]) {
     }
 }
 
-fn eval<T: Tensor + HStack + 'static>(
+fn eval<T: Tensor + 'static>(
     nodes: &mut [TapeNode<T>],
     idx: u32,
     callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
@@ -324,10 +372,18 @@ fn eval<T: Tensor + HStack + 'static>(
             let v = eval(nodes, term, callback);
             f(v)
         }
+        &BinaryFn(BinaryFnPayload {
+            lhs, rhs, ref f, ..
+        }) => {
+            let f = f.clone();
+            let lhs = eval(nodes, lhs, callback);
+            let rhs = eval(nodes, rhs, callback);
+            f(lhs, rhs)
+        }
         &HStack(lhs, rhs) => {
             let lhs = eval(nodes, lhs, callback);
             let rhs = eval(nodes, rhs, callback);
-            lhs.hstack(rhs)
+            lhs.hstack(rhs).unwrap()
         }
     };
     nodes[idx as usize].data = Some(data.clone());
@@ -347,11 +403,14 @@ pub trait HSplit: Sized {
 
 impl<'a, T: Tensor + HStack> HStack for TapeTerm<'a, T> {
     fn hstack(self, rhs: Self) -> Self {
-        let nodes = self.tape.nodes.borrow();
-        let lhs_v = nodes[self.idx as usize].data.clone().unwrap();
-        let rhs_v = nodes[rhs.idx as usize].data.clone().unwrap();
+        let mut nodes = self.tape.nodes.borrow_mut();
+        let lhs_name = &nodes[self.idx as usize].name;
+        let rhs_name = &nodes[rhs.idx as usize].name;
+        // let lhs_v = nodes[self.idx as usize].data.clone().unwrap();
+        // let rhs_v = nodes[rhs.idx as usize].data.clone().unwrap();
+        let name = format!("hstack({}, {})", lhs_name, rhs_name);
         self.tape
-            .term_name("hstack", TapeValue::HStack(self.idx, rhs.idx))
+            .term_name_borrowed(&mut nodes, name, TapeValue::HStack(self.idx, rhs.idx))
     }
 }
 
@@ -360,7 +419,7 @@ fn value<T: Clone>(nodes: &[TapeNode<T>], idx: u32) -> Option<T> {
 }
 
 /// wrt - The variable to derive With Respect To
-fn derive<T: Tensor + HStack>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T> {
+fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T> {
     use TapeValue::*;
     // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
     let grad = match nodes[idx as usize].value {
@@ -389,10 +448,19 @@ fn derive<T: Tensor + HStack>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> 
         UnaryFn(UnaryFnPayload { term, ref grad, .. }) => {
             grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
+        BinaryFn(BinaryFnPayload {
+            lhs, rhs, ref grad, ..
+        }) => {
+            let grad = grad.clone();
+            let lhs_derive = derive(nodes, lhs, wrt)?;
+            let rhs_derive = derive(nodes, rhs, wrt)?;
+            let (lhs_grad, rhs_grad) = grad(value(nodes, lhs)?, value(nodes, rhs)?);
+            lhs_grad * lhs_derive + rhs_grad * rhs_derive
+        }
         HStack(lhs, rhs) => {
             let lhs = derive(nodes, lhs, wrt)?;
             let rhs = derive(nodes, rhs, wrt)?;
-            lhs.hstack(rhs)
+            lhs.hstack(rhs).unwrap()
         }
     };
     Some(grad)
@@ -457,6 +525,18 @@ fn backprop_rec<T: Tensor>(
             }) => {
                 let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
                 backprop_set(nodes, term, grad * g(val), callback)
+            }
+            BinaryFn(BinaryFnPayload {
+                lhs,
+                rhs,
+                grad: ref g,
+                ..
+            }) => {
+                let lhs_val = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+                let rhs_val = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let (lhs_grad, rhs_grad) = g(lhs_val, rhs_val);
+                backprop_set(nodes, lhs, grad.clone() * lhs_grad, callback);
+                backprop_set(nodes, rhs, grad * rhs_grad, callback);
             }
             HStack(lhs, rhs) => todo!(),
         }
@@ -550,6 +630,7 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
                 Div(lhs, rhs) => [Some(lhs), Some(rhs)],
                 Neg(term) => [Some(term), None],
                 UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
+                BinaryFn(BinaryFnPayload { lhs, rhs, .. }) => [Some(lhs), Some(rhs)],
                 HStack(lhs, rhs) => [Some(lhs), Some(rhs)],
             };
             for pid in parents.into_iter().filter_map(|v| v) {
