@@ -28,6 +28,7 @@ struct UnaryFnPayload<T> {
     term: u32,
     f: fn(T) -> T,
     grad: fn(T) -> T,
+    t: Option<fn(T) -> T>,
 }
 
 #[derive(Clone, Debug)]
@@ -230,6 +231,28 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
                 term: self.idx,
                 f,
                 grad,
+                t: None,
+            }),
+        )
+    }
+
+    /// Apply a function, its derivative and a transposition
+    pub fn apply_t(
+        &self,
+        name: &(impl AsRef<str> + ?Sized),
+        f: fn(T) -> T,
+        grad: fn(T) -> T,
+        t: fn(T) -> T,
+    ) -> Self {
+        let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        let name = format!("{}({})", name.as_ref(), self_name);
+        self.tape.term_name(
+            name,
+            TapeValue::UnaryFn(UnaryFnPayload {
+                term: self.idx,
+                f,
+                grad,
+                t: Some(t),
             }),
         )
     }
@@ -272,6 +295,10 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             vertical: false,
             hilight: None,
         }
+    }
+
+    pub fn data(&self) -> Option<T> {
+        self.tape.nodes.borrow()[self.idx as usize].data.clone()
     }
 
     pub fn grad(&self) -> Option<T> {
@@ -402,9 +429,13 @@ fn backprop_rec<T: Tensor>(
                 backprop_set(nodes, rhs, -grad * elhs / erhs.clone() / erhs, callback);
             }
             Neg(term) => backprop_set(nodes, term, -grad, callback),
-            UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+            UnaryFn(UnaryFnPayload {
+                term, grad: g, t, ..
+            }) => {
                 let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
-                backprop_set(nodes, term, grad * g(val), callback)
+                let newgrad = grad * g(val);
+                let endgrad = if let Some(t) = t { t(newgrad) } else { newgrad };
+                backprop_set(nodes, term, endgrad, callback)
             }
         }
     }

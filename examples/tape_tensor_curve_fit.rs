@@ -7,23 +7,32 @@ use std::{fmt::Display, io::Write, ops::Range};
 #[derive(Clone, PartialEq, Debug)]
 struct MyTensor(Vec<f64>);
 
+impl MyTensor {
+    fn sum(self) -> Self {
+        MyTensor(vec![self.0.iter().sum()])
+    }
+}
+
 const XRANGE: Range<i32> = -40..40;
 
 fn broadcast_binop(lhs: MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) -> MyTensor {
     // Broadcasting rules
-    MyTensor(if lhs.0.len() == 1 {
-        let lhs = lhs.0[0];
-        rhs.0.into_iter().map(|rhs| op(lhs, rhs)).collect()
-    } else if rhs.0.len() == 1 {
-        let rhs = rhs.0[0];
-        lhs.0.into_iter().map(|lhs| op(lhs, rhs)).collect()
-    } else {
-        lhs.0
-            .into_iter()
-            .zip(rhs.0.into_iter())
-            .map(|(lhs, rhs)| op(lhs, rhs))
-            .collect()
-    })
+    MyTensor(
+        //     if lhs.0.len() == 1 {
+        //     let lhs = lhs.0[0];
+        //     rhs.0.into_iter().map(|rhs| op(lhs, rhs)).collect()
+        // } else if rhs.0.len() == 1 {
+        //     let rhs = rhs.0[0];
+        //     lhs.0.into_iter().map(|lhs| op(lhs, rhs)).collect()
+        // } else
+        {
+            lhs.0
+                .into_iter()
+                .zip(rhs.0.into_iter())
+                .map(|(lhs, rhs)| op(lhs, rhs))
+                .collect()
+        },
+    )
 }
 
 fn broadcast_binassign(lhs: &mut MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) {
@@ -148,18 +157,24 @@ fn main() {
 
     let calc_loss = || {
         model.x.set(xs.clone()).unwrap();
-        model.loss.eval().0.into_iter().sum::<f64>()
+        model.loss.eval().0[0]
     };
 
-    const RATE: f64 = 0.01;
+    const RATE: f64 = 0.005;
     const INIT_MU: f64 = 0.;
     const INIT_SIGMA: f64 = 1.;
     const INIT_SCALE: f64 = 1.;
 
     let optimize = |mu: &mut f64, sigma: &mut f64, scale: &mut f64| {
         model.mu.set(MyTensor(vec![*mu])).unwrap();
-        model.sigma.set(MyTensor(vec![*sigma])).unwrap();
-        model.scale.set(MyTensor(vec![*scale])).unwrap();
+        model
+            .sigma
+            .set(MyTensor(vec![*sigma; XRANGE.len()]))
+            .unwrap();
+        model
+            .scale
+            .set(MyTensor(vec![*scale; XRANGE.len()]))
+            .unwrap();
         // for (&xval, &sample_y) in samples.iter().zip(truth_data.iter())
         {
             model.x.set(xs.clone()).unwrap();
@@ -167,7 +182,10 @@ fn main() {
             model.loss.eval();
             model.loss.backprop().unwrap();
             // println!("x: {}, sample_y: {}, dmu: {}", xs.0.len(), truth_data.0.len(), model.mu.grad().0.iter().sum::<f64>());
-            *mu -= model.mu.grad().unwrap().0.iter().sum::<f64>() * RATE;
+            // println!("mu: ({:?}, {:?}) v_mu: ({:?}, {:?})", model.mu.data().unwrap().0, model.mu.grad().unwrap().0, model.v_mu.data().unwrap().0, model.v_mu.grad().unwrap().0);
+            let dmu = model.mu.grad().unwrap().0.iter().sum::<f64>();
+            println!("dmu: {dmu}");
+            *mu -= dmu * RATE;
             *sigma -= model.sigma.grad().unwrap().0.iter().sum::<f64>() * RATE;
             *scale -= model.scale.grad().unwrap().0.iter().sum::<f64>() * RATE;
         }
@@ -177,7 +195,7 @@ fn main() {
     let mut sigma_val = INIT_SIGMA;
     let mut scale_val = INIT_SCALE;
     let mut history = vec![];
-    for i in 0..100 {
+    for i in 0..200 {
         optimize(&mut mu_val, &mut sigma_val, &mut scale_val);
         let t = i as f64;
         if history
@@ -197,11 +215,23 @@ fn main() {
     writeln!(file, "x, init_y, truth_y").unwrap();
     model.x.set(xs).unwrap();
     model.mu.set(MyTensor(vec![mu_val])).unwrap();
-    model.sigma.set(MyTensor(vec![sigma_val])).unwrap();
-    model.scale.set(MyTensor(vec![scale_val])).unwrap();
+    model
+        .sigma
+        .set(MyTensor(vec![sigma_val; XRANGE.len()]))
+        .unwrap();
+    model
+        .scale
+        .set(MyTensor(vec![scale_val; XRANGE.len()]))
+        .unwrap();
     model.mu.set(MyTensor(vec![INIT_MU])).unwrap();
-    model.sigma.set(MyTensor(vec![INIT_SIGMA])).unwrap();
-    model.scale.set(MyTensor(vec![INIT_SCALE])).unwrap();
+    model
+        .sigma
+        .set(MyTensor(vec![INIT_SIGMA; XRANGE.len()]))
+        .unwrap();
+    model
+        .scale
+        .set(MyTensor(vec![INIT_SCALE; XRANGE.len()]))
+        .unwrap();
     let init_value = model.gaussian.eval();
     for (i, ((&xval, &init_y), &truth_y)) in samples
         .iter()
@@ -213,23 +243,33 @@ fn main() {
             .iter()
             .map(|(_, mu_val, sigma_val, scale_val)| {
                 model.mu.set(MyTensor(vec![*mu_val])).unwrap();
-                model.sigma.set(MyTensor(vec![*sigma_val])).unwrap();
-                model.scale.set(MyTensor(vec![*scale_val])).unwrap();
-                model.gaussian.eval().0[i]
+                model
+                    .sigma
+                    .set(MyTensor(vec![*sigma_val; XRANGE.len()]))
+                    .unwrap();
+                model
+                    .scale
+                    .set(MyTensor(vec![*scale_val; XRANGE.len()]))
+                    .unwrap();
+                model.loss.eval(); //.0[i]
+                model.loss.backprop().unwrap();
+                model.gaussian.data().unwrap().0[i]
             })
             .fold("".to_string(), |acc, cur| acc + &format!(", {cur}"));
         writeln!(file, "{xval}, {init_y}, {truth_y}{hist_string}").unwrap();
     }
-    model.x.set(MyTensor::default()).unwrap();
-    model.gaussian.eval();
-    model.gaussian.backprop().unwrap();
-    let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    model.gaussian.dot(&mut dotfile).unwrap();
+
+    // model.x.set(xs.clone()).unwrap();
+    // model.loss.eval();
+    // model.loss.backprop().unwrap();
+    // let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
+    // model.loss.dot_builder().vertical(true).show_values(true).dot(&mut dotfile).unwrap();
 }
 
 struct Model<'a> {
     x: TapeTerm<'a, MyTensor>,
     mu: TapeTerm<'a, MyTensor>,
+    v_mu: TapeTerm<'a, MyTensor>,
     sigma: TapeTerm<'a, MyTensor>,
     scale: TapeTerm<'a, MyTensor>,
     sample_y: TapeTerm<'a, MyTensor>,
@@ -241,23 +281,66 @@ fn my_exp(x: MyTensor) -> MyTensor {
     MyTensor(x.0.into_iter().map(|x| x.exp()).collect())
 }
 
+fn bcast(v: MyTensor) -> MyTensor {
+    // println!("Broadcasting {} to {}", v.0[0], XRANGE.len());
+    MyTensor(XRANGE.map(|_| v.0[0]).collect())
+}
+
+fn bcast1(_: MyTensor) -> MyTensor {
+    // println!("Broadcasting {} to {}", v.0[0], XRANGE.len());
+    MyTensor(vec![1.; XRANGE.len()])
+}
+
+fn distribute(v: MyTensor) -> MyTensor {
+    // println!("Ditributing {} to {}", v.0[0], XRANGE.len());
+    MyTensor(XRANGE.map(|_| v.0[0] / XRANGE.len() as f64).collect())
+}
+
+fn average(v: MyTensor) -> MyTensor {
+    let len = v.0.len() as f64;
+    // println!("average from {} elems -> {}", len, v.0.iter().sum::<f64>() / len);
+    MyTensor(vec![v.0.into_iter().sum::<f64>() / len])
+}
+
+fn collapse(v: MyTensor) -> MyTensor {
+    // println!("Broadcasting {} to {}", v.0[0], XRANGE.len());
+    MyTensor(vec![v.0.len() as f64])
+}
+
 fn build_model(tape: &Tape<MyTensor>) -> Model {
     let x = tape.term("x", MyTensor::default());
     let mu = tape.term("mu", MyTensor::default());
+    let v_mu = mu.apply_t("bcast", bcast, bcast1, |v| MyTensor::sum(v));
     let sigma = tape.term("sigma", MyTensor::one());
     let scale = tape.term("scale", MyTensor::one());
-    let x_mu = x - mu;
+    let x_mu = x - v_mu;
     let gaussian = scale * (-(x_mu * x_mu) / sigma / sigma).apply("exp", my_exp, my_exp);
     let sample_y = tape.term("y", MyTensor::default());
     let diff = gaussian - sample_y;
-    let loss = diff * diff;
+    let loss = (diff * diff).apply_t("sum", MyTensor::sum, collapse, distribute);
     Model {
         x,
         mu,
+        v_mu,
         sigma,
         scale,
         gaussian,
         sample_y,
         loss,
+    }
+}
+
+#[test]
+fn test_bcast() {
+    for [xval, yval] in [[-1., -80.], [0., 0.], [1., 80.]] {
+        let tape = Tape::new();
+        let x = tape.term("x", MyTensor(vec![xval]));
+        let v_x = x.apply_t("bcast", bcast, bcast1, MyTensor::sum);
+        let y = v_x.apply_t("sum", MyTensor::sum, collapse, distribute);
+        assert_eq!(y.eval(), MyTensor(vec![yval]));
+        y.backprop().unwrap();
+        assert_eq!(y.grad().unwrap(), MyTensor(vec![1.]));
+        assert_eq!(v_x.grad().unwrap(), MyTensor(vec![1.; XRANGE.len()]));
+        assert_eq!(x.grad().unwrap(), MyTensor(vec![XRANGE.len() as f64]));
     }
 }
