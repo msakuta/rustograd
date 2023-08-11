@@ -15,43 +15,23 @@ impl MyTensor {
 
 const XRANGE: Range<i32> = -40..40;
 
-fn broadcast_binop(lhs: MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) -> MyTensor {
+fn tensor_binop(lhs: MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) -> MyTensor {
     assert_eq!(lhs.0.len(), rhs.0.len());
-    // Broadcasting rules
     MyTensor(
-        //     if lhs.0.len() == 1 {
-        //     let lhs = lhs.0[0];
-        //     rhs.0.into_iter().map(|rhs| op(lhs, rhs)).collect()
-        // } else if rhs.0.len() == 1 {
-        //     let rhs = rhs.0[0];
-        //     lhs.0.into_iter().map(|lhs| op(lhs, rhs)).collect()
-        // } else
-        {
-            lhs.0
-                .into_iter()
-                .zip(rhs.0.into_iter())
-                .map(|(lhs, rhs)| op(lhs, rhs))
-                .collect()
-        },
+        lhs.0
+            .into_iter()
+            .zip(rhs.0.into_iter())
+            .map(|(lhs, rhs)| op(lhs, rhs))
+            .collect(),
     )
 }
 
-fn broadcast_binassign(lhs: &mut MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) {
+fn tensor_binassign(lhs: &mut MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) {
     assert_eq!(lhs.0.len(), rhs.0.len());
-    // Broadcasting rules
-    // if lhs.0.len() == 1 {
-    //     let lhs_val = lhs.0[0];
-    //     lhs.0 = rhs.0.into_iter().map(|rhs| op(lhs_val, rhs)).collect();
-    // } else if rhs.0.len() == 1 {
-    //     let rhs = rhs.0[0];
-    //     lhs.0.iter_mut().for_each(|lhs| *lhs = op(*lhs, rhs));
-    // } else
-    {
-        lhs.0
-            .iter_mut()
-            .zip(rhs.0.into_iter())
-            .for_each(|(lhs, rhs)| *lhs = op(*lhs, rhs));
-    }
+    lhs.0
+        .iter_mut()
+        .zip(rhs.0.into_iter())
+        .for_each(|(lhs, rhs)| *lhs = op(*lhs, rhs));
 }
 
 impl Display for MyTensor {
@@ -73,33 +53,33 @@ impl Default for MyTensor {
 impl std::ops::Add for MyTensor {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
-        broadcast_binop(self, rhs, f64::add)
+        tensor_binop(self, rhs, f64::add)
     }
 }
 
 impl std::ops::AddAssign for MyTensor {
     fn add_assign(&mut self, rhs: Self) {
-        broadcast_binassign(self, rhs, |lhs, rhs| lhs + rhs);
+        tensor_binassign(self, rhs, |lhs, rhs| lhs + rhs);
     }
 }
 
 impl std::ops::Sub for MyTensor {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
-        broadcast_binop(self, rhs, f64::sub)
+        tensor_binop(self, rhs, f64::sub)
     }
 }
 
 impl std::ops::SubAssign for MyTensor {
     fn sub_assign(&mut self, rhs: Self) {
-        broadcast_binassign(self, rhs, |lhs, rhs| lhs - rhs);
+        tensor_binassign(self, rhs, |lhs, rhs| lhs - rhs);
     }
 }
 
 impl std::ops::Mul for MyTensor {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
-        broadcast_binop(self, rhs, f64::mul)
+        tensor_binop(self, rhs, f64::mul)
     }
 }
 
@@ -114,7 +94,7 @@ impl std::ops::Mul<f64> for MyTensor {
 impl std::ops::Div for MyTensor {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
-        broadcast_binop(self, rhs, f64::div)
+        tensor_binop(self, rhs, f64::div)
     }
 }
 
@@ -164,21 +144,15 @@ fn main() {
         model.loss.eval().0[0]
     };
 
-    const RATE: f64 = 0.002;
+    const RATE: f64 = 0.01;
     const INIT_MU: f64 = 0.;
     const INIT_SIGMA: f64 = 1.;
     const INIT_SCALE: f64 = 1.;
 
     let optimize = |mu: &mut f64, sigma: &mut f64, scale: &mut f64| {
         model.mu.set(MyTensor(vec![*mu])).unwrap();
-        model
-            .sigma
-            .set(MyTensor(vec![*sigma; XRANGE.len()]))
-            .unwrap();
-        model
-            .scale
-            .set(MyTensor(vec![*scale; XRANGE.len()]))
-            .unwrap();
+        model.sigma.set(MyTensor(vec![*sigma])).unwrap();
+        model.scale.set(MyTensor(vec![*scale])).unwrap();
         // for (&xval, &sample_y) in samples.iter().zip(truth_data.iter())
         {
             model.x.set(xs.clone()).unwrap();
@@ -187,11 +161,11 @@ fn main() {
             model.loss.backprop().unwrap();
             // println!("x: {}, sample_y: {}, dmu: {}", xs.0.len(), truth_data.0.len(), model.mu.grad().0.iter().sum::<f64>());
             // println!("mu: ({:?}, {:?}) v_mu: ({:?}, {:?})", model.mu.data().unwrap().0, model.mu.grad().unwrap().0, model.v_mu.data().unwrap().0, model.v_mu.grad().unwrap().0);
-            let dmu = model.mu.grad().unwrap().0.iter().sum::<f64>();
+            let dmu = model.mu.grad().unwrap().0[0];
             println!("dmu: {dmu}");
             *mu -= dmu * RATE;
-            *sigma -= model.sigma.grad().unwrap().0.iter().sum::<f64>() * RATE;
-            *scale -= model.scale.grad().unwrap().0.iter().sum::<f64>() * RATE;
+            *sigma -= model.sigma.grad().unwrap().0[0] * RATE;
+            *scale -= model.scale.grad().unwrap().0[0] * RATE;
         }
     };
 
@@ -199,7 +173,7 @@ fn main() {
     let mut sigma_val = INIT_SIGMA;
     let mut scale_val = INIT_SCALE;
     let mut history = vec![];
-    for i in 0..200 {
+    for i in 0..100 {
         optimize(&mut mu_val, &mut sigma_val, &mut scale_val);
         let t = i as f64;
         if history
@@ -217,25 +191,13 @@ fn main() {
 
     let mut file = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     writeln!(file, "x, init_y, truth_y").unwrap();
-    model.x.set(xs).unwrap();
+    model.x.set(xs.clone()).unwrap();
     model.mu.set(MyTensor(vec![mu_val])).unwrap();
-    model
-        .sigma
-        .set(MyTensor(vec![sigma_val; XRANGE.len()]))
-        .unwrap();
-    model
-        .scale
-        .set(MyTensor(vec![scale_val; XRANGE.len()]))
-        .unwrap();
+    model.sigma.set(MyTensor(vec![sigma_val])).unwrap();
+    model.scale.set(MyTensor(vec![scale_val])).unwrap();
     model.mu.set(MyTensor(vec![INIT_MU])).unwrap();
-    model
-        .sigma
-        .set(MyTensor(vec![INIT_SIGMA; XRANGE.len()]))
-        .unwrap();
-    model
-        .scale
-        .set(MyTensor(vec![INIT_SCALE; XRANGE.len()]))
-        .unwrap();
+    model.sigma.set(MyTensor(vec![INIT_SIGMA])).unwrap();
+    model.scale.set(MyTensor(vec![INIT_SCALE])).unwrap();
     let init_value = model.gaussian.eval();
     for (i, ((&xval, &init_y), &truth_y)) in samples
         .iter()
@@ -247,14 +209,8 @@ fn main() {
             .iter()
             .map(|(_, mu_val, sigma_val, scale_val)| {
                 model.mu.set(MyTensor(vec![*mu_val])).unwrap();
-                model
-                    .sigma
-                    .set(MyTensor(vec![*sigma_val; XRANGE.len()]))
-                    .unwrap();
-                model
-                    .scale
-                    .set(MyTensor(vec![*scale_val; XRANGE.len()]))
-                    .unwrap();
+                model.sigma.set(MyTensor(vec![*sigma_val])).unwrap();
+                model.scale.set(MyTensor(vec![*scale_val])).unwrap();
                 model.loss.eval(); //.0[i]
                 model.loss.backprop().unwrap();
                 model.gaussian.data().unwrap().0[i]
@@ -263,17 +219,22 @@ fn main() {
         writeln!(file, "{xval}, {init_y}, {truth_y}{hist_string}").unwrap();
     }
 
-    // model.x.set(xs.clone()).unwrap();
-    // model.loss.eval();
-    // model.loss.backprop().unwrap();
-    // let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
-    // model.loss.dot_builder().vertical(true).show_values(true).dot(&mut dotfile).unwrap();
+    model.x.set(xs.clone()).unwrap();
+    model.loss.eval();
+    model.loss.backprop().unwrap();
+    let mut dotfile = std::io::BufWriter::new(std::fs::File::create("graph.dot").unwrap());
+    model
+        .loss
+        .dot_builder()
+        .vertical(true)
+        // .show_values(true)
+        .dot(&mut dotfile)
+        .unwrap();
 }
 
 struct Model<'a> {
     x: TapeTerm<'a, MyTensor>,
     mu: TapeTerm<'a, MyTensor>,
-    v_mu: TapeTerm<'a, MyTensor>,
     sigma: TapeTerm<'a, MyTensor>,
     scale: TapeTerm<'a, MyTensor>,
     sample_y: TapeTerm<'a, MyTensor>,
@@ -344,16 +305,18 @@ fn build_model(tape: &Tape<MyTensor>) -> Model {
     let mu = tape.term("mu", MyTensor::default());
     let v_mu = mu.apply_t(Box::new(Broadcaster));
     let sigma = tape.term("sigma", MyTensor::one());
+    let sigma2 = sigma * sigma;
+    let v_sigma2 = sigma2.apply_t(Box::new(Broadcaster));
     let scale = tape.term("scale", MyTensor::one());
+    let v_scale = scale.apply_t(Box::new(Broadcaster));
     let x_mu = x - v_mu;
-    let gaussian = scale * (-(x_mu * x_mu) / sigma / sigma).apply("exp", my_exp, my_exp);
+    let gaussian = v_scale * (-(x_mu * x_mu) / v_sigma2).apply("exp", my_exp, my_exp);
     let sample_y = tape.term("y", MyTensor::default());
     let diff = gaussian - sample_y;
     let loss = (diff * diff).apply_t(Box::new(Summer));
     Model {
         x,
         mu,
-        v_mu,
         sigma,
         scale,
         gaussian,
