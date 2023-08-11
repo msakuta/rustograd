@@ -7,6 +7,7 @@ use crate::{
     error::ValueNotDefinedError,
     tensor::Tensor,
     unary_fn::{PtrUnaryFn, UnaryFn},
+    BinaryFn,
 };
 
 #[derive(Default, Debug)]
@@ -45,6 +46,22 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
     }
 }
 
+struct BinaryFnPayload<T> {
+    lhs: u32,
+    rhs: u32,
+    f: Box<dyn BinaryFn<T>>,
+}
+
+impl<T> std::fmt::Debug for BinaryFnPayload<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TermPayload")
+            .field("lhs", &self.lhs)
+            .field("rhs", &self.rhs)
+            .field("f", &"<dyn TapeFn>")
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 enum TapeValue<T> {
     Value(T),
@@ -54,6 +71,7 @@ enum TapeValue<T> {
     Div(TapeIndex, TapeIndex),
     Neg(TapeIndex),
     UnaryFn(UnaryFnPayload<T>),
+    BinaryFn(BinaryFnPayload<T>),
 }
 
 /// An implementation of forward/reverse mode automatic differentiation, using memory arena called a [`Tape`],
@@ -324,6 +342,19 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         )
     }
 
+    pub fn apply_bin(&self, rhs: TapeTerm, f: Box<dyn BinaryFn<T>>) -> Self {
+        let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        let name = format!("{}({})", f.name(), self_name);
+        self.tape.term_name(
+            name,
+            TapeValue::BinaryFn(BinaryFnPayload {
+                lhs: self.idx,
+                rhs: rhs.idx,
+                f,
+            }),
+        )
+    }
+
     pub fn set(&self, value: T) -> Result<(), ()> {
         let mut nodes = self.tape.nodes.borrow_mut();
         let node = nodes.get_mut(self.idx as usize).ok_or_else(|| ())?;
@@ -406,6 +437,15 @@ fn eval<T: Tensor + 'static>(
             };
             f.as_ref().unwrap().f(val)
         }
+        BinaryFn(BinaryFnPayload { lhs, rhs, .. }) => {
+            let vlhs = eval(nodes, lhs, callback);
+            let vrhs = eval(nodes, rhs, callback);
+            // Ugly re-matching to avoid borrow checker
+            let BinaryFn(BinaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
+                unreachable!()
+            };
+            f.f(vlhs, vrhs)
+        }
     };
     nodes[idx as usize].data = Some(data.clone());
     if let Some(callback) = callback {
@@ -447,6 +487,11 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: TapeIndex, wrt: TapeIndex) 
         Neg(term) => -derive(nodes, term, wrt)?,
         UnaryFn(UnaryFnPayload { term, ref f }) => {
             f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+        }
+        BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
+            f.grad(value(nodes, lhs)?, value(nodes, rhs)?)
+                * derive(nodes, lhs, wrt)?
+                * derive(nodes, rhs, wrt)?
         }
     };
     Some(grad)
@@ -695,6 +740,14 @@ fn backprop_rec<T: Tensor>(
                 let endgrad = f.t(newgrad);
                 backprop_set(nodes, term, endgrad, callback)
             }
+            BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
+                let vlhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+                let vrhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let newgrad = grad * f.grad(vlhs, vrhs);
+                let (grad_l, grad_r) = f.t(newgrad);
+                backprop_set(nodes, lhs, grad_l, callback);
+                backprop_set(nodes, rhs, grad_r, callback);
+            }
         }
     }
     Ok(())
@@ -803,12 +856,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
         for (id, term) in nodes.iter().enumerate() {
             let parents = match term.value {
                 Value(_) => [None, None],
-                Add(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Sub(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Mul(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Div(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Neg(term) => [Some(term), None],
-                UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
+                Add(lhs, rhs)
+                | Sub(lhs, rhs)
+                | Mul(lhs, rhs)
+                | Div(lhs, rhs)
+                | BinaryFn(BinaryFnPayload { lhs, rhs, .. }) => [Some(lhs), Some(rhs)],
+                Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
             };
             for pid in parents.into_iter().filter_map(|v| v) {
                 writeln!(writer, "a{} -> a{};", pid, id)?;
