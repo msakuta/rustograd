@@ -1,6 +1,6 @@
 //! Least squares fitting to a Gaussian distribution using gradient descent.
 
-use rustograd::{Tape, TapeTerm, Tensor};
+use rustograd::{Tape, TapeFn, TapeTerm, Tensor};
 
 use std::{fmt::Display, io::Write, ops::Range};
 
@@ -16,6 +16,7 @@ impl MyTensor {
 const XRANGE: Range<i32> = -40..40;
 
 fn broadcast_binop(lhs: MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) -> MyTensor {
+    assert_eq!(lhs.0.len(), rhs.0.len());
     // Broadcasting rules
     MyTensor(
         //     if lhs.0.len() == 1 {
@@ -36,14 +37,16 @@ fn broadcast_binop(lhs: MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) -
 }
 
 fn broadcast_binassign(lhs: &mut MyTensor, rhs: MyTensor, op: impl Fn(f64, f64) -> f64) {
+    assert_eq!(lhs.0.len(), rhs.0.len());
     // Broadcasting rules
-    if lhs.0.len() == 1 {
-        let lhs_val = lhs.0[0];
-        lhs.0 = rhs.0.into_iter().map(|rhs| op(lhs_val, rhs)).collect();
-    } else if rhs.0.len() == 1 {
-        let rhs = rhs.0[0];
-        lhs.0.iter_mut().for_each(|lhs| *lhs = op(*lhs, rhs));
-    } else {
+    // if lhs.0.len() == 1 {
+    //     let lhs_val = lhs.0[0];
+    //     lhs.0 = rhs.0.into_iter().map(|rhs| op(lhs_val, rhs)).collect();
+    // } else if rhs.0.len() == 1 {
+    //     let rhs = rhs.0[0];
+    //     lhs.0.iter_mut().for_each(|lhs| *lhs = op(*lhs, rhs));
+    // } else
+    {
         lhs.0
             .iter_mut()
             .zip(rhs.0.into_iter())
@@ -56,6 +59,7 @@ impl Display for MyTensor {
         for item in &self.0 {
             write!(f, "{item}, ")?;
         }
+        // write!(f, "[{}]", self.0.len())?;
         Ok(())
     }
 }
@@ -160,7 +164,7 @@ fn main() {
         model.loss.eval().0[0]
     };
 
-    const RATE: f64 = 0.005;
+    const RATE: f64 = 0.002;
     const INIT_MU: f64 = 0.;
     const INIT_SIGMA: f64 = 1.;
     const INIT_SCALE: f64 = 1.;
@@ -296,28 +300,56 @@ fn distribute(v: MyTensor) -> MyTensor {
     MyTensor(XRANGE.map(|_| v.0[0] / XRANGE.len() as f64).collect())
 }
 
-fn average(v: MyTensor) -> MyTensor {
-    let len = v.0.len() as f64;
-    // println!("average from {} elems -> {}", len, v.0.iter().sum::<f64>() / len);
-    MyTensor(vec![v.0.into_iter().sum::<f64>() / len])
-}
-
 fn collapse(v: MyTensor) -> MyTensor {
     // println!("Broadcasting {} to {}", v.0[0], XRANGE.len());
     MyTensor(vec![v.0.len() as f64])
 }
 
+struct Broadcaster;
+
+impl TapeFn<MyTensor> for Broadcaster {
+    fn name(&self) -> String {
+        "bcast".to_string()
+    }
+    fn f(&self, data: MyTensor) -> MyTensor {
+        bcast(data)
+    }
+    fn grad(&self, data: MyTensor) -> MyTensor {
+        bcast1(data)
+    }
+    fn t(&self, data: MyTensor) -> MyTensor {
+        MyTensor::sum(data)
+    }
+}
+
+struct Summer;
+
+impl TapeFn<MyTensor> for Summer {
+    fn name(&self) -> String {
+        "sum".to_string()
+    }
+    fn f(&self, data: MyTensor) -> MyTensor {
+        MyTensor::sum(data)
+    }
+    fn grad(&self, data: MyTensor) -> MyTensor {
+        collapse(data)
+    }
+    fn t(&self, data: MyTensor) -> MyTensor {
+        distribute(data)
+    }
+}
+
 fn build_model(tape: &Tape<MyTensor>) -> Model {
     let x = tape.term("x", MyTensor::default());
     let mu = tape.term("mu", MyTensor::default());
-    let v_mu = mu.apply_t("bcast", bcast, bcast1, |v| MyTensor::sum(v));
+    let v_mu = mu.apply_t(Box::new(Broadcaster));
     let sigma = tape.term("sigma", MyTensor::one());
     let scale = tape.term("scale", MyTensor::one());
     let x_mu = x - v_mu;
     let gaussian = scale * (-(x_mu * x_mu) / sigma / sigma).apply("exp", my_exp, my_exp);
     let sample_y = tape.term("y", MyTensor::default());
     let diff = gaussian - sample_y;
-    let loss = (diff * diff).apply_t("sum", MyTensor::sum, collapse, distribute);
+    let loss = (diff * diff).apply_t(Box::new(Summer));
     Model {
         x,
         mu,
@@ -335,8 +367,8 @@ fn test_bcast() {
     for [xval, yval] in [[-1., -80.], [0., 0.], [1., 80.]] {
         let tape = Tape::new();
         let x = tape.term("x", MyTensor(vec![xval]));
-        let v_x = x.apply_t("bcast", bcast, bcast1, MyTensor::sum);
-        let y = v_x.apply_t("sum", MyTensor::sum, collapse, distribute);
+        let v_x = x.apply_t(Box::new(Broadcaster));
+        let y = v_x.apply_t(Box::new(Summer));
         assert_eq!(y.eval(), MyTensor(vec![yval]));
         y.backprop().unwrap();
         assert_eq!(y.grad().unwrap(), MyTensor(vec![1.]));

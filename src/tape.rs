@@ -15,7 +15,7 @@ pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct TapeNode<T> {
     name: String,
     value: TapeValue<T>,
@@ -23,15 +23,54 @@ pub struct TapeNode<T> {
     grad: Option<T>,
 }
 
-#[derive(Clone, Debug)]
 struct UnaryFnPayload<T> {
     term: u32,
+    f: Box<dyn TapeFn<T>>,
+}
+
+impl<T> std::fmt::Debug for UnaryFnPayload<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TermPayload")
+            .field("term", &self.term)
+            .field("f", &"<dyn TapeFn>")
+            .finish()
+    }
+}
+
+pub trait TapeFn<T> {
+    fn name(&self) -> String;
+    fn f(&self, data: T) -> T;
+    fn grad(&self, data: T) -> T;
+    fn t(&self, data: T) -> T;
+}
+
+struct PtrTapeFn<T> {
+    name: String,
     f: fn(T) -> T,
     grad: fn(T) -> T,
     t: Option<fn(T) -> T>,
 }
 
-#[derive(Clone, Debug)]
+impl<T> TapeFn<T> for PtrTapeFn<T> {
+    fn name(&self) -> String {
+        self.name.clone()
+    }
+    fn f(&self, data: T) -> T {
+        (self.f)(data)
+    }
+    fn grad(&self, data: T) -> T {
+        (self.grad)(data)
+    }
+    fn t(&self, data: T) -> T {
+        if let Some(t) = self.t {
+            t(data)
+        } else {
+            data
+        }
+    }
+}
+
+#[derive(Debug)]
 enum TapeValue<T> {
     Value(T),
     Add(u32, u32),
@@ -229,31 +268,23 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             name,
             TapeValue::UnaryFn(UnaryFnPayload {
                 term: self.idx,
-                f,
-                grad,
-                t: None,
+                f: Box::new(PtrTapeFn {
+                    name: self_name,
+                    f,
+                    grad,
+                    t: None,
+                }),
             }),
         )
     }
 
     /// Apply a function, its derivative and a transposition
-    pub fn apply_t(
-        &self,
-        name: &(impl AsRef<str> + ?Sized),
-        f: fn(T) -> T,
-        grad: fn(T) -> T,
-        t: fn(T) -> T,
-    ) -> Self {
+    pub fn apply_t(&self, f: Box<dyn TapeFn<T>>) -> Self {
         let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
-        let name = format!("{}({})", name.as_ref(), self_name);
+        let name = format!("{}({})", f.name(), self_name);
         self.tape.term_name(
             name,
-            TapeValue::UnaryFn(UnaryFnPayload {
-                term: self.idx,
-                f,
-                grad,
-                t: Some(t),
-            }),
+            TapeValue::UnaryFn(UnaryFnPayload { term: self.idx, f }),
         )
     }
 
@@ -321,14 +352,21 @@ fn eval<T: Tensor + 'static>(
     if let Some(ref data) = nodes[idx as usize].data {
         return data.clone();
     }
-    let data = match &nodes[idx as usize].value {
-        Value(val) => val.clone(),
-        &Add(lhs, rhs) => eval(nodes, lhs, callback) + eval(nodes, rhs, callback),
-        &Sub(lhs, rhs) => eval(nodes, lhs, callback) - eval(nodes, rhs, callback),
-        &Mul(lhs, rhs) => eval(nodes, lhs, callback) * eval(nodes, rhs, callback),
-        &Div(lhs, rhs) => eval(nodes, lhs, callback) / eval(nodes, rhs, callback),
-        &Neg(term) => -eval(nodes, term, callback),
-        &UnaryFn(UnaryFnPayload { term, f, .. }) => f(eval(nodes, term, callback)),
+    let data = match nodes[idx as usize].value {
+        Value(ref val) => val.clone(),
+        Add(lhs, rhs) => eval(nodes, lhs, callback) + eval(nodes, rhs, callback),
+        Sub(lhs, rhs) => eval(nodes, lhs, callback) - eval(nodes, rhs, callback),
+        Mul(lhs, rhs) => eval(nodes, lhs, callback) * eval(nodes, rhs, callback),
+        Div(lhs, rhs) => eval(nodes, lhs, callback) / eval(nodes, rhs, callback),
+        Neg(term) => -eval(nodes, term, callback),
+        UnaryFn(UnaryFnPayload { term, .. }) => {
+            let val = eval(nodes, term, callback);
+            // Ugly re-matching to avoid borrow checker
+            let UnaryFn(UnaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
+                unreachable!()
+            };
+            f.f(val)
+        }
     };
     nodes[idx as usize].data = Some(data.clone());
     if let Some(callback) = callback {
@@ -368,8 +406,8 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
             dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
         }
         Neg(term) => -derive(nodes, term, wrt)?,
-        UnaryFn(UnaryFnPayload { term, grad, .. }) => {
-            grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+        UnaryFn(UnaryFnPayload { term, ref f }) => {
+            f.grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
     };
     Some(grad)
@@ -429,12 +467,10 @@ fn backprop_rec<T: Tensor>(
                 backprop_set(nodes, rhs, -grad * elhs / erhs.clone() / erhs, callback);
             }
             Neg(term) => backprop_set(nodes, term, -grad, callback),
-            UnaryFn(UnaryFnPayload {
-                term, grad: g, t, ..
-            }) => {
+            UnaryFn(UnaryFnPayload { term, ref f }) => {
                 let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
-                let newgrad = grad * g(val);
-                let endgrad = if let Some(t) = t { t(newgrad) } else { newgrad };
+                let newgrad = grad * f.grad(val);
+                let endgrad = f.t(newgrad);
                 backprop_set(nodes, term, endgrad, callback)
             }
         }
