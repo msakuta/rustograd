@@ -48,7 +48,6 @@ struct PtrTapeFn<T> {
     name: String,
     f: fn(T) -> T,
     grad: fn(T) -> T,
-    t: Option<fn(T) -> T>,
 }
 
 impl<T> TapeFn<T> for PtrTapeFn<T> {
@@ -62,11 +61,7 @@ impl<T> TapeFn<T> for PtrTapeFn<T> {
         (self.grad)(data)
     }
     fn t(&self, data: T) -> T {
-        if let Some(t) = self.t {
-            t(data)
-        } else {
-            data
-        }
+        data
     }
 }
 
@@ -272,7 +267,6 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
                     name: self_name,
                     f,
                     grad,
-                    t: None,
                 }),
             }),
         )
