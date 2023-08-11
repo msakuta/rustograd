@@ -3,7 +3,11 @@
 
 use std::{cell::RefCell, io::Write};
 
-use crate::{error::ValueNotDefinedError, tensor::Tensor};
+use crate::{
+    error::ValueNotDefinedError,
+    tensor::Tensor,
+    unary_fn::{PtrUnaryFn, UnaryFn},
+};
 
 #[derive(Default, Debug)]
 /// A storage for [`TapeTerm`]s.
@@ -25,7 +29,7 @@ pub struct TapeNode<T> {
 
 struct UnaryFnPayload<T> {
     term: u32,
-    f: Box<dyn TapeFn<T>>,
+    f: Box<dyn UnaryFn<T>>,
 }
 
 impl<T> std::fmt::Debug for UnaryFnPayload<T> {
@@ -34,34 +38,6 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
             .field("term", &self.term)
             .field("f", &"<dyn TapeFn>")
             .finish()
-    }
-}
-
-pub trait TapeFn<T> {
-    fn name(&self) -> String;
-    fn f(&self, data: T) -> T;
-    fn grad(&self, data: T) -> T;
-    fn t(&self, data: T) -> T;
-}
-
-struct PtrTapeFn<T> {
-    name: String,
-    f: fn(T) -> T,
-    grad: fn(T) -> T,
-}
-
-impl<T> TapeFn<T> for PtrTapeFn<T> {
-    fn name(&self) -> String {
-        self.name.clone()
-    }
-    fn f(&self, data: T) -> T {
-        (self.f)(data)
-    }
-    fn grad(&self, data: T) -> T {
-        (self.grad)(data)
-    }
-    fn t(&self, data: T) -> T {
-        data
     }
 }
 
@@ -263,7 +239,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             name,
             TapeValue::UnaryFn(UnaryFnPayload {
                 term: self.idx,
-                f: Box::new(PtrTapeFn {
+                f: Box::new(PtrUnaryFn {
                     name: self_name,
                     f,
                     grad,
@@ -273,7 +249,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     }
 
     /// Apply a function, its derivative and a transposition
-    pub fn apply_t(&self, f: Box<dyn TapeFn<T>>) -> Self {
+    pub fn apply_t(&self, f: Box<dyn UnaryFn<T>>) -> Self {
         let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
         let name = format!("{}({})", f.name(), self_name);
         self.tape.term_name(

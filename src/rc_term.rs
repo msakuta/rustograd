@@ -5,13 +5,15 @@ use std::{
     rc::Rc,
 };
 
-use crate::{error::ValueNotDefinedError, tensor::Tensor};
+use crate::{
+    error::ValueNotDefinedError,
+    tensor::Tensor,
+    unary_fn::{PtrUnaryFn, UnaryFn},
+};
 
-#[derive(Clone)]
 struct UnaryFnPayload<T: Tensor> {
     term: RcTerm<T>,
-    f: fn(T) -> T,
-    grad: fn(T) -> T,
+    f: Box<dyn UnaryFn<T>>,
 }
 
 enum TermInt<T: Tensor> {
@@ -24,7 +26,7 @@ enum TermInt<T: Tensor> {
     UnaryFn(UnaryFnPayload<T>),
 }
 
-impl<T: Tensor> TermInt<T> {
+impl<T: Tensor + 'static> TermInt<T> {
     fn eval(&self, callback: &impl Fn(RcTerm<T>)) -> T {
         use TermInt::*;
         match self {
@@ -34,7 +36,7 @@ impl<T: Tensor> TermInt<T> {
             Mul(lhs, rhs) => lhs.eval_int(callback) * rhs.eval_int(callback),
             Div(lhs, rhs) => lhs.eval_int(callback) / rhs.eval_int(callback),
             Neg(term) => -term.eval_int(callback),
-            UnaryFn(UnaryFnPayload { term, f, .. }) => f(term.eval_int(callback)),
+            UnaryFn(UnaryFnPayload { term, f }) => f.f(term.eval_int(callback)),
         }
     }
 }
@@ -46,13 +48,13 @@ struct TermPayload<T: Tensor> {
     grad: RefCell<Option<T>>,
 }
 
-impl<T: Tensor> TermPayload<T> {
+impl<T: Tensor + 'static> TermPayload<T> {
     fn new(name: String, value: TermInt<T>) -> Self {
-        let data = value.eval(&|_| ());
+        // let data = value.eval(&|_| ());
         Self {
             name,
             value,
-            data: RefCell::new(Some(data)),
+            data: RefCell::new(None),
             grad: RefCell::new(None),
         }
     }
@@ -102,7 +104,7 @@ impl<T: Tensor> std::fmt::Debug for TermPayload<T> {
 /// ```
 pub struct RcTerm<T: Tensor = f64>(Rc<TermPayload<T>>);
 
-impl<T: Tensor> Add for &RcTerm<T> {
+impl<T: Tensor + 'static> Add for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn add(self, rhs: Self) -> Self::Output {
         let name = format!("({} + {})", self.0.name, rhs.0.name);
@@ -113,7 +115,7 @@ impl<T: Tensor> Add for &RcTerm<T> {
     }
 }
 
-impl<T: Tensor> Sub for &RcTerm<T> {
+impl<T: Tensor + 'static> Sub for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn sub(self, rhs: Self) -> Self::Output {
         let name = format!("({} - {})", self.0.name, rhs.0.name);
@@ -124,7 +126,7 @@ impl<T: Tensor> Sub for &RcTerm<T> {
     }
 }
 
-impl<T: Tensor> Mul for &RcTerm<T> {
+impl<T: Tensor + 'static> Mul for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn mul(self, rhs: Self) -> Self::Output {
         let name = format!("{} * {}", self.0.name, rhs.0.name);
@@ -135,7 +137,7 @@ impl<T: Tensor> Mul for &RcTerm<T> {
     }
 }
 
-impl<T: Tensor> Div for &RcTerm<T> {
+impl<T: Tensor + 'static> Div for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn div(self, rhs: Self) -> Self::Output {
         let name = format!("{} / {}", self.0.name, rhs.0.name);
@@ -146,7 +148,7 @@ impl<T: Tensor> Div for &RcTerm<T> {
     }
 }
 
-impl<T: Tensor> std::ops::Neg for &RcTerm<T> {
+impl<T: Tensor + 'static> std::ops::Neg for &RcTerm<T> {
     type Output = RcTerm<T>;
     fn neg(self) -> Self::Output {
         let name = format!("-{}", self.0.name);
@@ -154,7 +156,7 @@ impl<T: Tensor> std::ops::Neg for &RcTerm<T> {
     }
 }
 
-impl<T: Tensor> RcTerm<T> {
+impl<T: Tensor + 'static> RcTerm<T> {
     pub fn new(name: impl Into<String>, val: T) -> RcTerm<T> {
         Self(Rc::new(TermPayload::new(
             name.into(),
@@ -182,6 +184,9 @@ impl<T: Tensor> RcTerm<T> {
 
     fn accum<'a>(&'a self, map: &mut Vec<DotEntry<'a, T>>) {
         use TermInt::*;
+        if map.iter().any(|a| self.id() == a.id) {
+            return;
+        }
         let parents = match &self.0.value {
             Value(_) => vec![],
             Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => {
@@ -224,7 +229,7 @@ impl<T: Tensor> RcTerm<T> {
                     dlhs / erhs.clone() - elhs / erhs.clone() / erhs * drhs
                 }
                 Neg(term) => -term.derive(var),
-                UnaryFn(UnaryFnPayload { term, grad, .. }) => grad(term.eval()) * term.derive(var),
+                UnaryFn(UnaryFnPayload { term, f }) => f.grad(term.eval()) * term.derive(var),
             }
         };
         grad
@@ -263,9 +268,11 @@ impl<T: Tensor> RcTerm<T> {
     fn backprop_node(&self, grad: &T, callback: &impl Fn(RcTerm<T>)) {
         {
             let mut borrow = self.0.grad.borrow_mut();
-            let grad_val =
-                borrow.as_ref().map(Clone::clone).unwrap_or_else(T::default) + grad.clone();
-            *borrow = Some(grad_val);
+            if let Some(grad_val) = borrow.as_mut() {
+                *grad_val += grad.clone();
+            } else {
+                *borrow = Some(grad.clone());
+            }
         }
         callback(self.clone());
     }
@@ -301,9 +308,11 @@ impl<T: Tensor> RcTerm<T> {
                     rhs.backprop_node(&(-grad.clone() * elhs / erhs.clone() / erhs), callback);
                 }
                 Neg(term) => term.backprop_node(&-grad.clone(), callback),
-                UnaryFn(UnaryFnPayload { term, grad: g, .. }) => {
+                UnaryFn(UnaryFnPayload { term, f, .. }) => {
                     let val = term.eval_int(&null_callback);
-                    term.backprop_node(&(grad.clone() * g(val)), callback);
+                    let newgrad = grad.clone() * f.grad(val);
+                    let endgrad = f.t(newgrad);
+                    term.backprop_node(&endgrad, callback);
                 }
             }
         }
@@ -364,23 +373,35 @@ impl<T: Tensor> RcTerm<T> {
         };
     }
 
-    // pub fn exp(&self) -> Self {
-    //     self.apply("exp", f64::exp, f64::exp)
-    // }
-
     pub fn apply(
         &self,
-        name: &(impl AsRef<str> + ?Sized),
+        fn_name: &(impl AsRef<str> + ?Sized),
         f: fn(T) -> T,
         grad: fn(T) -> T,
     ) -> Self {
-        let name = format!("{}({})", name.as_ref(), self.0.name.clone());
+        let name = format!("{}({})", fn_name.as_ref(), self.0.name.clone());
+        Self::new_payload(TermPayload::new(
+            name,
+            TermInt::UnaryFn(UnaryFnPayload {
+                term: self.clone(),
+                f: Box::new(PtrUnaryFn {
+                    name: fn_name.as_ref().to_string(),
+                    f,
+                    grad,
+                }),
+            }),
+        ))
+    }
+
+    /// Apply a function, its derivative and a transposition
+    pub fn apply_t(&self, f: Box<dyn UnaryFn<T>>) -> Self {
+        let self_name = self.0.name.clone();
+        let name = format!("{}({})", f.name(), self_name);
         Self::new_payload(TermPayload::new(
             name,
             TermInt::UnaryFn(UnaryFnPayload {
                 term: self.clone(),
                 f,
-                grad,
             }),
         ))
     }
@@ -399,6 +420,7 @@ impl<T: Tensor> RcTerm<T> {
         RcDotBuilder {
             this: self.clone(),
             show_values: true,
+            vertical: false,
             hilight: None,
         }
     }
@@ -414,13 +436,19 @@ struct DotEntry<'a, T: Tensor> {
 pub struct RcDotBuilder<T: Tensor> {
     this: RcTerm<T>,
     show_values: bool,
+    vertical: bool,
     hilight: Option<RcTerm<T>>,
 }
 
-impl<T: Tensor> RcDotBuilder<T> {
+impl<T: Tensor + 'static> RcDotBuilder<T> {
     /// Set whether to show values and gradients of the terms on the node labels
     pub fn show_values(mut self, v: bool) -> Self {
         self.show_values = v;
+        self
+    }
+
+    pub fn vertical(mut self, v: bool) -> Self {
+        self.vertical = v;
         self
     }
 
@@ -434,7 +462,11 @@ impl<T: Tensor> RcDotBuilder<T> {
     pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
         let mut map = Vec::new();
         self.this.accum(&mut map);
-        writeln!(writer, "digraph G {{\nrankdir=\"LR\";")?;
+        writeln!(
+            writer,
+            "digraph G {{\nrankdir=\"{}\";",
+            if self.vertical { "TB" } else { "LR" }
+        )?;
         for entry in &map {
             let DotEntry {
                 id, payload: term, ..

@@ -1,6 +1,6 @@
 //! Least squares fitting to a Gaussian distribution using gradient descent.
 
-use rustograd::{Tape, TapeFn, TapeTerm, Tensor};
+use rustograd::{Tape, TapeTerm, Tensor, UnaryFn};
 
 use std::{fmt::Display, io::Write, ops::Range};
 
@@ -268,7 +268,7 @@ fn collapse(v: MyTensor) -> MyTensor {
 
 struct Broadcaster;
 
-impl TapeFn<MyTensor> for Broadcaster {
+impl UnaryFn<MyTensor> for Broadcaster {
     fn name(&self) -> String {
         "bcast".to_string()
     }
@@ -285,7 +285,7 @@ impl TapeFn<MyTensor> for Broadcaster {
 
 struct Summer;
 
-impl TapeFn<MyTensor> for Summer {
+impl UnaryFn<MyTensor> for Summer {
     fn name(&self) -> String {
         "sum".to_string()
     }
