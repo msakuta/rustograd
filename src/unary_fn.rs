@@ -5,7 +5,9 @@ pub trait UnaryFn<T> {
     fn name(&self) -> String;
     fn f(&self, data: T) -> T;
     fn grad(&self, data: T) -> T;
-    fn t(&self, data: T) -> T;
+    fn t(&self, data: T) -> T {
+        data
+    }
 }
 
 pub(crate) struct PtrUnaryFn<T> {
