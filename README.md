@@ -326,21 +326,37 @@ The codes are in [rc_curve_fit](examples/rc_curve_fit.rs), [rc_tensor_curve_fit]
 
 * rc - `RcTerm`, with `Cell<f64>` as the payload
 * rc_refcell - `RcTerm<f64>`, with `RefCell<f64>` as the payload
+* rc2_refcell - same as rc_refcell, except topological sorting of nodes in backprop
 * rc_tensor - `RcTerm<MyTensor>`, with `RefCell<MyTensor>` with 80 elements as the payload
-* tape - `TapeTerm`, with `f64` as the payload
-* tape_tensor - `TapeTerm<MyTensor>`, with `MyTensor` with 80 elements as the payload
-* tape2 - same as tape, except improved backprop strategy (rolling tape)
-* tape2_tensor - same as tape_tensor, except improved backprop strategy (rolling tape)
+* rc_t - same as rc2_refcell, except using generic function implementation
+* rc_bcast - same as rc_tensor, except using broadcast and sum operators
+* tape - `TapeTerm<f64>` (rolling tape implementation)
+* tape_tensor - `TapeTerm<MyTensor>`, with `MyTensor` having 80 elements as the payload (rolling tape implementation)
+* tape_t - same as tape, except using generic function implementation
+* tape_bcast - same as tape_tensor, except using broadcast and sum operators
+* manual - a handwritten gradient function to optimize, measured as a reference
 
 The difference between `rc` and `rc_refcell` is that the former uses `Cell` as the container of the value, while the latter uses `RefCell`.
 If the value is a `Copy`, we could use `Cell` and there is no overhead in runtime borrow checking, but if it was not a `Copy`, we have to use `RefCell` to update it.
 A tensor is (usually) not a copy, so we have to use `RefCell`, so I was interested in the overhead.
 
 As you can see, `TapeTerm<f64>` is faster than `RcTerm<f64>`.
-Also, the performance gain by changing from `f64` (scalar) to `MyTensor` is greater than the introduction of `RefCell`, and it is almost the same between `RcTerm<MyTensor>` and `TapeTerm<MyTensor>`.
+Most of the `RcTerm<f64>`'s overhead is that it needs to build a topologically sorted list to scan, while `TapeTerm` already do that during construction.
+This overhead is reduced by collecting values in a tensor, as you can see in rc_tensor, because the list only needs to be built once per the whole vector.
+
+The performance gain by changing from `f64` (scalar) to `MyTensor` is greater than the introduction of `RefCell`, and it is almost the same between `RcTerm<MyTensor>` and `TapeTerm<MyTensor>`.
 
 It indicates that even though `MyTensor` uses additional heap memory allocation, it is still faster to aggregate operation in an expression, rather than scanning the scalar value and evaluating each of them.
 Next step is to investigate if using a memory arena for the contents of the tensor helps further.
 
 On top of that, utilizing the tape's property that every variable has no dependencies after that node makes it possible to "roll" the tape and calculate differentials in one evaluation per node.
 It improves the performance even further by removing redundant visits.
+
+The last bit of optimization comes from broadcasting and summing operators.
+See the details in [this PR](https://github.com/msakuta/rustograd/pull/6).
+After using these operators, `RcTerm<MyTensor>` is even faster than `TapeTerm<MyTensor>`, but I don't know why.
+
+As a reference, I measured the speed of manually calculated gradient on paper.
+See [examples/manual_curve_fit.rs](examples/manual_curve_fit.rs) for the full code.
+It is kind of theoretical limit of speed (although I could factor out more to improve speed).
+Automatic differentiation has inevitable overhead, but you can see that it is not too large.
