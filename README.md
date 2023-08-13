@@ -312,6 +312,41 @@ Also there are 2 arrows from `(x - mu0)` to `(x - mu0) * (x - mu0)` because we r
 ![peak_separation_graph_zoomed](images/peak_separation_graph_zoomed.png)
 
 
+### Path smoothing
+
+You can find the source code example [here](examples/tape_path_smooth.rs)
+
+Another common (and relatively easy) problem is the path smoothing.
+Suppose we have a path of points (a list of x, y coordinates pairs).
+Our goal is to smooth the path with a given potential.
+
+In this example, we put a Gaussian potential, whose mean is at (1, 1).
+We need to minimize the total length of the path, but at the same time, we need to avoid the source of the potential.
+
+The update rule can be written like this:
+
+$$
+\vec{x}_{i, t+1} = \vec{x}_{i, t} - \nabla p(\vec{x}_{i, t}) - \frac{\partial L}{\partial \vec{x}_{i, t }}
+$$
+
+where $\vec{x}_{i, t}$ is a position vector of node $i$ at iteration $t$.
+
+The potential $p(\vec{x})$ here is a Gaussian function, but you can use any function.
+
+$$
+p(\vec{x}; \vec{\mu}, \sigma, s) = -s \exp\left(-\frac{(\vec{x} - \vec{\mu})^2}{\sigma^2}\right)
+$$
+
+The cost function for the total distance $L$ is defined as follows:
+
+$$
+L = \sum_i (\vec{x}_{i + 1} - \vec{x}_i)^2
+$$
+
+![path-smoothing](images/path_smooth.gif)
+
+![path-smoothing](images/path_smooth.svg)
+
 ## Performance investigation
 
 We can measure the performance of each type of terms.
