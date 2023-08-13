@@ -233,6 +233,17 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         }
     }
 
+    pub fn gen_graph(&self, var: &Self) -> Option<Self> {
+        let new_node = {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            gen_graph(&mut nodes, self.idx, var.idx)
+        };
+        new_node.map(|idx| TapeTerm {
+            tape: self.tape,
+            idx,
+        })
+    }
+
     pub fn apply(
         &self,
         name: &(impl AsRef<str> + ?Sized),
@@ -387,6 +398,112 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
         }
     };
     Some(grad)
+}
+
+fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeValue<T>) -> u32 {
+    let new_idx = nodes.len();
+    nodes.push(TapeNode {
+        name,
+        value,
+        data: None,
+        grad: None,
+    });
+    new_idx as u32
+}
+
+fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Option<u32> {
+    use TapeValue::*;
+    match nodes[idx as usize].value {
+        Value(_) => {
+            if idx == wrt {
+                let new_name = format!("d {}", nodes[idx as usize].name);
+                Some(add_node(nodes, new_name, Value(T::one())))
+            } else {
+                None
+            }
+        }
+        Add(lhs, rhs) => {
+            let lhs = gen_graph(nodes, lhs, wrt);
+            let rhs = gen_graph(nodes, rhs, wrt);
+            match (lhs, rhs) {
+                (Some(lhs), None) => Some(lhs),
+                (None, Some(rhs)) => Some(rhs),
+                (Some(lhs), Some(rhs)) => {
+                    let name = format!(
+                        "{} + {}",
+                        nodes[lhs as usize].name, nodes[rhs as usize].name
+                    );
+                    let node = add_node(nodes, name, Add(lhs, rhs));
+                    Some(node)
+                }
+                _ => None,
+            }
+        }
+        Sub(lhs, rhs) => {
+            let lhs = gen_graph(nodes, lhs, wrt);
+            let rhs = gen_graph(nodes, rhs, wrt);
+            match (lhs, rhs) {
+                (Some(lhs), None) => Some(lhs),
+                (None, Some(rhs)) => {
+                    let node = add_node(nodes, format!("-{}", nodes[rhs as usize].name), Neg(rhs));
+                    Some(node)
+                }
+                (Some(lhs), Some(rhs)) => {
+                    let name = format!(
+                        "{} - {}",
+                        nodes[lhs as usize].name, nodes[rhs as usize].name
+                    );
+                    let node = add_node(nodes, name, Add(lhs, rhs));
+                    Some(node)
+                }
+                _ => None,
+            }
+        }
+        Mul(lhs, rhs) => {
+            let dlhs = gen_graph(nodes, lhs, wrt);
+            let drhs = gen_graph(nodes, rhs, wrt);
+            match (dlhs, drhs) {
+                (Some(dlhs), None) => {
+                    let name = format!(
+                        "{} * {}",
+                        nodes[dlhs as usize].name, nodes[rhs as usize].name
+                    );
+                    let node = add_node(nodes, name, Mul(dlhs, rhs));
+                    Some(node)
+                }
+                (None, Some(drhs)) => {
+                    let name = format!(
+                        "{} * {}",
+                        nodes[lhs as usize].name, nodes[drhs as usize].name
+                    );
+                    let node = add_node(nodes, name, Mul(lhs, drhs));
+                    Some(node)
+                }
+                (Some(dlhs), Some(drhs)) => {
+                    let l_name = format!(
+                        "{} * {}",
+                        nodes[dlhs as usize].name, nodes[rhs as usize].name
+                    );
+                    let plhs = add_node(nodes, l_name, Mul(dlhs, rhs));
+                    let r_name = format!(
+                        "{} * {}",
+                        nodes[lhs as usize].name, nodes[drhs as usize].name
+                    );
+                    let prhs = add_node(nodes, r_name, Mul(lhs, drhs));
+                    let node_name = format!(
+                        "{} + {}",
+                        nodes[plhs as usize].name, nodes[prhs as usize].name
+                    );
+                    let node = add_node(nodes, node_name, Add(plhs, prhs));
+                    Some(node)
+                }
+                _ => None,
+            }
+        }
+        Div(lhs, rhs) => todo!(),
+        Neg(term) => todo!(),
+        UnaryFn(UnaryFnPayload { .. }) => todo!(),
+    }
 }
 
 fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
