@@ -217,6 +217,12 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         eval(&mut nodes, self.idx, Some(callback))
     }
 
+    pub fn eval_noclear(&self) -> T {
+        let mut nodes = self.tape.nodes.borrow_mut();
+        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
+        eval(&mut nodes, self.idx, callback)
+    }
+
     /// One-time derivation. Does not update internal gradient values.
     pub fn derive(&self, var: &Self) -> Option<T> {
         if self.idx == var.idx {
@@ -413,7 +419,9 @@ fn backprop_rec<T: Tensor>(
     nodes[idx as usize].grad = Some(T::one());
     callback(nodes, idx);
     for i in (0..=idx).rev() {
-        let grad = nodes[i as usize].grad.as_ref().unwrap().clone();
+        let Some(grad) = nodes[i as usize].grad.as_ref().map(Clone::clone) else {
+            continue;
+        };
         match nodes[i as usize].value {
             Value(_) => (),
             Add(lhs, rhs) => {
