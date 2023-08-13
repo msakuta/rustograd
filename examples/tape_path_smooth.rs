@@ -109,11 +109,16 @@ fn build_model(tape: &Tape) -> Model {
     let pot_x = tape.term("pot_x", 1.);
     let pot_y = tape.term("pot_y", 1.);
     let sigma2 = tape.term("4.", 4.);
-    let potential = x.iter().zip(y.iter()).map(|(x, y)| {
-        let x_diff = *x - pot_x;
-        let y_diff = *y - pot_y;
-        (-(x_diff * x_diff + y_diff * y_diff) / sigma2).apply("exp", f64::exp, f64::exp)
-    }).reduce(|acc, cur| acc + cur).unwrap();
+    let potential = x
+        .iter()
+        .zip(y.iter())
+        .map(|(x, y)| {
+            let x_diff = *x - pot_x;
+            let y_diff = *y - pot_y;
+            (-(x_diff * x_diff + y_diff * y_diff) / sigma2).apply("exp", f64::exp, f64::exp)
+        })
+        .reduce(|acc, cur| acc + cur)
+        .unwrap();
     let scale = tape.term("1.25", 1.25);
     let x_diff: Vec<_> = x
         .iter()
@@ -132,6 +137,7 @@ fn build_model(tape: &Tape) -> Model {
         .zip(y_diff2.iter())
         .map(|(x, y)| *x + *y)
         .reduce(|acc, x| acc + x)
-        .unwrap() + scale * potential;
+        .unwrap()
+        + scale * potential;
     Model { x, y, loss }
 }
