@@ -1,7 +1,7 @@
 //! Implementation of shared memory arena for the terms, aka a tape.
 //! See https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
-use std::{cell::RefCell, io::Write};
+use std::{cell::RefCell, collections::HashMap, io::Write};
 
 use crate::{
     error::ValueNotDefinedError,
@@ -17,6 +17,7 @@ use crate::{
 /// Also the deallocation is much faster because it merely frees the dynamic array once.
 pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
+    derive_map: RefCell<HashMap<u32, u32>>,
 }
 
 #[derive(Debug)]
@@ -236,7 +237,8 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn gen_graph(&self, var: &Self) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
-            gen_graph(&mut nodes, self.idx, var.idx)
+            let mut derive_map = self.tape.derive_map.borrow_mut();
+            gen_graph(&mut nodes, &mut derive_map, self.idx, var.idx)
         };
         new_node.map(|idx| TapeTerm {
             tape: self.tape,
@@ -411,20 +413,30 @@ fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeVa
     new_idx as u32
 }
 
-fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Option<u32> {
+fn gen_graph<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    derive_map: &mut HashMap<u32, u32>,
+    idx: u32,
+    wrt: u32,
+) -> Option<u32> {
     use TapeValue::*;
+    if let Some(derived) = derive_map.get(&idx) {
+        return Some(*derived);
+    }
     match nodes[idx as usize].value {
         Value(_) => {
             if idx == wrt {
                 let new_name = format!("d {}", nodes[idx as usize].name);
-                Some(add_node(nodes, new_name, Value(T::one())))
+                let node = add_node(nodes, new_name, Value(T::one()));
+                derive_map.insert(idx, node);
+                Some(node)
             } else {
                 None
             }
         }
         Add(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt);
-            let rhs = gen_graph(nodes, rhs, wrt);
+            let lhs = gen_graph(nodes, derive_map, lhs, wrt);
+            let rhs = gen_graph(nodes, derive_map, rhs, wrt);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(rhs),
@@ -440,8 +452,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Sub(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt);
-            let rhs = gen_graph(nodes, rhs, wrt);
+            let lhs = gen_graph(nodes, derive_map, lhs, wrt);
+            let rhs = gen_graph(nodes, derive_map, rhs, wrt);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => {
@@ -460,8 +472,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Mul(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, lhs, wrt);
-            let drhs = gen_graph(nodes, rhs, wrt);
+            let dlhs = gen_graph(nodes, derive_map, lhs, wrt);
+            let drhs = gen_graph(nodes, derive_map, rhs, wrt);
             match (dlhs, drhs) {
                 (Some(dlhs), None) => {
                     let name = format!(
