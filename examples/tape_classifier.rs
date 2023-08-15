@@ -165,7 +165,9 @@ fn build_model(tape: &Tape) -> Model {
     let log_softmax1 = softmax1.apply("ln", f64::ln, |x| 1. / x);
     let log_softmax2 = softmax2.apply("ln", f64::ln, |x| 1. / x);
     let one = tape.term("1", 1.);
-    let loss = label * log_softmax1 + (one - label) * log_softmax2;
+    let regularizer = w0 * w0 + w1 * w1 + w2 * w2 + w3 * w3;
+    let regular_factor = tape.term("f", 1.);
+    let loss = label * log_softmax1 + (one - label) * log_softmax2 + regular_factor * regularizer;
     Model {
         x,
         y,
