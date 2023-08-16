@@ -30,7 +30,7 @@ pub struct TapeNode<T> {
 
 struct UnaryFnPayload<T> {
     term: u32,
-    f: Box<dyn UnaryFn<T>>,
+    f: Option<Box<dyn UnaryFn<T>>>,
 }
 
 impl<T> std::fmt::Debug for UnaryFnPayload<T> {
@@ -258,11 +258,11 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             name,
             TapeValue::UnaryFn(UnaryFnPayload {
                 term: self.idx,
-                f: Box::new(PtrUnaryFn {
+                f: Some(Box::new(PtrUnaryFn {
                     name: self_name,
                     f,
                     grad,
-                }),
+                })),
             }),
         )
     }
@@ -273,7 +273,10 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         let name = format!("{}({})", f.name(), self_name);
         self.tape.term_name(
             name,
-            TapeValue::UnaryFn(UnaryFnPayload { term: self.idx, f }),
+            TapeValue::UnaryFn(UnaryFnPayload {
+                term: self.idx,
+                f: Some(f),
+            }),
         )
     }
 
@@ -354,7 +357,7 @@ fn eval<T: Tensor + 'static>(
             let UnaryFn(UnaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
                 unreachable!()
             };
-            f.f(val)
+            f.as_ref().unwrap().f(val)
         }
     };
     nodes[idx as usize].data = Some(data.clone());
@@ -396,7 +399,7 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
         }
         Neg(term) => -derive(nodes, term, wrt)?,
         UnaryFn(UnaryFnPayload { term, ref f }) => {
-            f.grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+            f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
     };
     Some(grad)
@@ -429,7 +432,7 @@ fn add_sub<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     add_node(nodes, name, TapeValue::Sub(lhs, rhs))
 }
 
-fn add_mul<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+pub fn add_mul<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     let name = format!(
         "{} * {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -528,7 +531,22 @@ fn gen_graph<T: Tensor>(
             }
         }
         Neg(term) => gen_graph(nodes, derive_map, term, wrt).map(|node| add_neg(nodes, node)),
-        UnaryFn(UnaryFnPayload { .. }) => todo!(),
+        UnaryFn(UnaryFnPayload { term, ref mut f }) => {
+            let taken_f = f.take();
+            let derived = gen_graph(nodes, derive_map, term, wrt);
+            let ret = derived.and_then(|derived| {
+                taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, idx, term, derived)
+            });
+            if let UnaryFn(UnaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
+                *f = taken_f;
+            } else {
+                unreachable!()
+            }
+            ret
+        }
     }
 }
 
@@ -590,6 +608,7 @@ fn backprop_rec<T: Tensor>(
             Neg(term) => backprop_set(nodes, term, -grad, callback),
             UnaryFn(UnaryFnPayload { term, ref f }) => {
                 let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
+                let f = f.as_ref().unwrap();
                 let newgrad = grad * f.grad(val);
                 let endgrad = f.t(newgrad);
                 backprop_set(nodes, term, endgrad, callback)
