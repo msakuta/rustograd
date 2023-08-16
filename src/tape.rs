@@ -413,6 +413,43 @@ fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeVa
     new_idx as u32
 }
 
+fn add_add<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+    let name = format!(
+        "{} + {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Add(lhs, rhs))
+}
+
+fn add_sub<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+    let name = format!(
+        "{} - {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Sub(lhs, rhs))
+}
+
+fn add_mul<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+    let name = format!(
+        "{} * {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Mul(lhs, rhs))
+}
+
+fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+    let name = format!(
+        "{} / {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Div(lhs, rhs))
+}
+
+fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: u32) -> u32 {
+    let name = format!("-{}", nodes[node as usize].name);
+    add_node(nodes, name, TapeValue::Neg(node))
+}
+
 fn gen_graph<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     derive_map: &mut HashMap<u32, u32>,
@@ -440,14 +477,7 @@ fn gen_graph<T: Tensor>(
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(rhs),
-                (Some(lhs), Some(rhs)) => {
-                    let name = format!(
-                        "{} + {}",
-                        nodes[lhs as usize].name, nodes[rhs as usize].name
-                    );
-                    let node = add_node(nodes, name, Add(lhs, rhs));
-                    Some(node)
-                }
+                (Some(lhs), Some(rhs)) => Some(add_add(nodes, lhs, rhs)),
                 _ => None,
             }
         }
@@ -456,18 +486,8 @@ fn gen_graph<T: Tensor>(
             let rhs = gen_graph(nodes, derive_map, rhs, wrt);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
-                (None, Some(rhs)) => {
-                    let node = add_node(nodes, format!("-{}", nodes[rhs as usize].name), Neg(rhs));
-                    Some(node)
-                }
-                (Some(lhs), Some(rhs)) => {
-                    let name = format!(
-                        "{} - {}",
-                        nodes[lhs as usize].name, nodes[rhs as usize].name
-                    );
-                    let node = add_node(nodes, name, Add(lhs, rhs));
-                    Some(node)
-                }
+                (None, Some(rhs)) => Some(add_neg(nodes, rhs)),
+                (Some(lhs), Some(rhs)) => Some(add_sub(nodes, lhs, rhs)),
                 _ => None,
             }
         }
@@ -475,44 +495,38 @@ fn gen_graph<T: Tensor>(
             let dlhs = gen_graph(nodes, derive_map, lhs, wrt);
             let drhs = gen_graph(nodes, derive_map, rhs, wrt);
             match (dlhs, drhs) {
-                (Some(dlhs), None) => {
-                    let name = format!(
-                        "{} * {}",
-                        nodes[dlhs as usize].name, nodes[rhs as usize].name
-                    );
-                    let node = add_node(nodes, name, Mul(dlhs, rhs));
-                    Some(node)
-                }
-                (None, Some(drhs)) => {
-                    let name = format!(
-                        "{} * {}",
-                        nodes[lhs as usize].name, nodes[drhs as usize].name
-                    );
-                    let node = add_node(nodes, name, Mul(lhs, drhs));
-                    Some(node)
-                }
+                (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs)),
+                (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs)),
                 (Some(dlhs), Some(drhs)) => {
-                    let l_name = format!(
-                        "{} * {}",
-                        nodes[dlhs as usize].name, nodes[rhs as usize].name
-                    );
-                    let plhs = add_node(nodes, l_name, Mul(dlhs, rhs));
-                    let r_name = format!(
-                        "{} * {}",
-                        nodes[lhs as usize].name, nodes[drhs as usize].name
-                    );
-                    let prhs = add_node(nodes, r_name, Mul(lhs, drhs));
-                    let node_name = format!(
-                        "{} + {}",
-                        nodes[plhs as usize].name, nodes[prhs as usize].name
-                    );
-                    let node = add_node(nodes, node_name, Add(plhs, prhs));
+                    let plhs = add_mul(nodes, dlhs, rhs);
+                    let prhs = add_mul(nodes, lhs, drhs);
+                    let node = add_add(nodes, plhs, prhs);
                     Some(node)
                 }
                 _ => None,
             }
         }
-        Div(lhs, rhs) => todo!(),
+        Div(lhs, rhs) => {
+            let dlhs = gen_graph(nodes, derive_map, lhs, wrt);
+            let drhs = gen_graph(nodes, derive_map, rhs, wrt);
+            match (dlhs, drhs) {
+                (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs)),
+                (None, Some(drhs)) => {
+                    let node = add_mul(nodes, lhs, drhs);
+                    let node = add_div(nodes, node, rhs);
+                    let node = add_div(nodes, node, rhs);
+                    Some(add_neg(nodes, node))
+                }
+                (Some(dlhs), Some(drhs)) => {
+                    let plhs = add_div(nodes, dlhs, rhs);
+                    let node = add_mul(nodes, lhs, drhs);
+                    let prhs = add_div(nodes, node, rhs);
+                    let prhs = add_div(nodes, prhs, rhs);
+                    Some(add_sub(nodes, plhs, prhs))
+                }
+                _ => None,
+            }
+        }
         Neg(term) => todo!(),
         UnaryFn(UnaryFnPayload { .. }) => todo!(),
     }
