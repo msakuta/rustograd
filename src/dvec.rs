@@ -28,14 +28,14 @@ impl<T: Tensor> Dvec<T> {
         self.0.len() == 1
     }
 
-    fn F(&self) -> Self {
+    fn f(&self) -> Self {
         // Front operator
         let mut ffront = self.clone();
         ffront.0.pop_back();
         ffront
     }
 
-    fn D(&self) -> Self {
+    fn d(&self) -> Self {
         // Derivation operator
         let mut fback = self.clone();
         fback.0.pop_front();
@@ -69,7 +69,7 @@ impl<T: Tensor> Dvec<T> {
         } else {
             Self::new(
                 f(self.0[0].clone(), n),
-                &self.F().apply_rec(f, n + 1) * &self.D(),
+                &self.f().apply_rec(f, n + 1) * &self.d(),
             )
         }
     }
@@ -80,7 +80,7 @@ impl Dvec<f64> {
         if self.is_real() {
             single(self.0[0].cos())
         } else {
-            Self::new(self.0[0].cos(), &-&(&self.F()).sin() * &self.D())
+            Self::new(self.0[0].cos(), &-&(&self.f()).sin() * &self.d())
         }
     }
 
@@ -88,7 +88,7 @@ impl Dvec<f64> {
         if self.is_real() {
             single(self.0[0].sin())
         } else {
-            Self::new(self.0[0].sin(), &(&self.F()).cos() * &self.D())
+            Self::new(self.0[0].sin(), &(&self.f()).cos() * &self.d())
         }
     }
 
@@ -96,7 +96,7 @@ impl Dvec<f64> {
         if self.is_real() {
             single(self.0[0].exp())
         } else {
-            Self::new(self.0[0].exp(), &(&self.F()).exp() * &self.D())
+            Self::new(self.0[0].exp(), &(&self.f()).exp() * &self.d())
         }
     }
 }
@@ -129,7 +129,7 @@ impl<T: Tensor> std::ops::Add for &Dvec<T> {
         if self.is_real() || rhs.is_real() {
             single(self.0[0].clone() + rhs.0[0].clone())
         } else {
-            Dvec::new(self.0[0].clone() + rhs.0[0].clone(), &self.D() + &rhs.D())
+            Dvec::new(self.0[0].clone() + rhs.0[0].clone(), &self.d() + &rhs.d())
         }
     }
 }
@@ -140,7 +140,7 @@ impl<T: Tensor> std::ops::Sub for &Dvec<T> {
         if self.is_real() || rhs.is_real() {
             single(self.0[0].clone() - rhs.0[0].clone())
         } else {
-            Dvec::new(self.0[0].clone() - rhs.0[0].clone(), &self.D() - &rhs.D())
+            Dvec::new(self.0[0].clone() - rhs.0[0].clone(), &self.d() - &rhs.d())
         }
     }
 }
@@ -153,7 +153,7 @@ impl<T: Tensor> std::ops::Mul for &Dvec<T> {
         } else {
             Dvec::new(
                 self.0[0].clone() * rhs.0[0].clone(),
-                &(&self.D() * &rhs.F()) + &(&self.F() * &rhs.D()),
+                &(&self.d() * &rhs.f()) + &(&self.f() * &rhs.d()),
             )
         }
     }
@@ -167,7 +167,7 @@ impl<T: Tensor> std::ops::Div for Dvec<T> {
         } else {
             Dvec::new(
                 self.0[0].clone() / rhs.0[0].clone(),
-                (&(&self.D() * &rhs) - &(&self * &rhs.D())) / (&rhs * &rhs),
+                (&(&self.d() * &rhs) - &(&self * &rhs.d())) / (&rhs * &rhs),
             )
         }
     }
