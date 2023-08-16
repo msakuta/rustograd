@@ -527,7 +527,7 @@ fn gen_graph<T: Tensor>(
                 _ => None,
             }
         }
-        Neg(term) => todo!(),
+        Neg(term) => gen_graph(nodes, derive_map, term, wrt).map(|node| add_neg(nodes, node)),
         UnaryFn(UnaryFnPayload { .. }) => todo!(),
     }
 }
