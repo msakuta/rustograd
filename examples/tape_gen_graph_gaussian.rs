@@ -62,6 +62,7 @@ fn main() {
         .last()
         .unwrap()
         .dot_builder()
+        .vertical(true)
         .show_values(true)
         .dot(&mut writer)
         .unwrap();

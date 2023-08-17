@@ -317,6 +317,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             show_values: false,
             vertical: false,
             hilight: None,
+            precision: 2,
         }
     }
 
@@ -645,6 +646,7 @@ pub struct TapeDotBuilder<'a, T: Default> {
     show_values: bool,
     vertical: bool,
     hilight: Option<u32>,
+    precision: usize,
 }
 
 impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
@@ -662,6 +664,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Set a term to show highlighted border around it.
     pub fn highlights(mut self, term: u32) -> Self {
         self.hilight = Some(term);
+        self
+    }
+
+    /// Set floating point precision after decimal point
+    pub fn precision(mut self, precision: usize) -> Self {
+        self.precision = precision;
         self
     }
 
@@ -695,15 +703,16 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
                 ""
             };
             let label = if self.show_values {
+                let formatter = |v| format!("{v:.precision$}", precision = self.precision);
                 format!(
                     "\\ndata:{}, grad:{}",
                     term.data
                         .as_ref()
-                        .map(|v| format!("{v}"))
+                        .map(formatter)
                         .unwrap_or_else(|| "None".into()),
                     term.grad
                         .as_ref()
-                        .map(|v| format!("{v:0.2}"))
+                        .map(formatter)
                         .unwrap_or_else(|| "None".into())
                 )
             } else {
