@@ -416,6 +416,11 @@ fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeVa
     new_idx as u32
 }
 
+pub fn add_value<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, val: T) -> u32 {
+    let name = format!("{val}");
+    add_node(nodes, name, TapeValue::Value(val))
+}
+
 fn add_add<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     let name = format!(
         "{} + {}",
@@ -424,7 +429,7 @@ fn add_add<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     add_node(nodes, name, TapeValue::Add(lhs, rhs))
 }
 
-fn add_sub<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+pub fn add_sub<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     let name = format!(
         "{} - {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
