@@ -2,7 +2,7 @@
 use std::io::Write;
 
 use rustograd::{
-    tape::{add_mul, add_unary_fn, add_value, TapeNode},
+    tape::{add_mul, add_unary_fn, add_value, TapeIndex, TapeNode},
     Tape, UnaryFn,
 };
 
@@ -24,10 +24,10 @@ impl UnaryFn<f64> for PolynomialFn {
     fn gen_graph(
         &self,
         nodes: &mut Vec<TapeNode<f64>>,
-        _idx: u32,
-        input: u32,
-        _derived: u32,
-    ) -> Option<u32> {
+        input: TapeIndex,
+        _output: TapeIndex,
+        _derived: TapeIndex,
+    ) -> Option<TapeIndex> {
         if self.0 == 0 {
             None
         } else if 1 < self.0 {

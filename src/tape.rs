@@ -588,7 +588,7 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
                 taken_f
                     .as_ref()
                     .unwrap()
-                    .gen_graph(nodes, idx, term, derived)
+                    .gen_graph(nodes, term, idx, derived)
             });
             if let UnaryFn(UnaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
                 *f = taken_f;

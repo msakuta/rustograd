@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use rustograd::{
-    tape::{add_unary_fn, TapeNode},
+    tape::{add_unary_fn, TapeIndex, TapeNode},
     Tape, UnaryFn,
 };
 
@@ -36,10 +36,10 @@ impl UnaryFn<f64> for SinFn {
     fn gen_graph(
         &self,
         nodes: &mut Vec<TapeNode<f64>>,
-        _idx: u32,
-        input: u32,
-        _derived: u32,
-    ) -> Option<u32> {
+        input: TapeIndex,
+        _output: TapeIndex,
+        _derived: TapeIndex,
+    ) -> Option<TapeIndex> {
         Some(add_unary_fn(nodes, Box::new(Self(self.0 + 1)), input))
     }
 }

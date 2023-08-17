@@ -27,8 +27,8 @@ impl UnaryFn<f64> for SigmoidFn {
     fn gen_graph(
         &self,
         nodes: &mut Vec<TapeNode<f64>>,
-        idx: TapeIndex,
         _input: TapeIndex,
+        output: TapeIndex,
         _derived: TapeIndex,
     ) -> Option<TapeIndex> {
         // 1 - sigmoid(x) comes up too often in gen_graph that caching it will remove a lot of
@@ -36,11 +36,11 @@ impl UnaryFn<f64> for SigmoidFn {
         let one_minus_sigmoid = if let Some(cached) = self.node_cache.get() {
             cached
         } else {
-            let cache = add_sub(nodes, TAPE_ONE, idx);
+            let cache = add_sub(nodes, TAPE_ONE, output);
             self.node_cache.set(Some(cache));
             cache
         };
-        Some(add_mul(nodes, one_minus_sigmoid, idx))
+        Some(add_mul(nodes, one_minus_sigmoid, output))
     }
 }
 

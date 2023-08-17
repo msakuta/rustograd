@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use rustograd::{
-    tape::{add_mul, TapeNode},
+    tape::{add_mul, TapeIndex, TapeNode},
     Tape, UnaryFn,
 };
 
@@ -23,11 +23,11 @@ impl UnaryFn<f64> for ExpFn {
     fn gen_graph(
         &self,
         nodes: &mut Vec<TapeNode<f64>>,
-        idx: u32,
-        _input: u32,
-        derived: u32,
-    ) -> Option<u32> {
-        Some(add_mul(nodes, idx, derived))
+        _input: TapeIndex,
+        output: TapeIndex,
+        derived: TapeIndex,
+    ) -> Option<TapeIndex> {
+        Some(add_mul(nodes, output, derived))
     }
 }
 
