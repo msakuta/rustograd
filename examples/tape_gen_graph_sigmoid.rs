@@ -1,15 +1,18 @@
-use std::io::Write;
+use std::{cell::Cell, io::Write};
 
 use rustograd::{
-    tape::{add_mul, add_sub, add_value, TapeNode},
+    tape::{add_mul, add_sub, TapeIndex, TapeNode, TAPE_ONE},
     Tape, UnaryFn,
 };
 
-struct SigmoidFn;
+#[derive(Default)]
+struct SigmoidFn {
+    node_cache: Cell<Option<TapeIndex>>,
+}
 
 impl UnaryFn<f64> for SigmoidFn {
     fn name(&self) -> String {
-        "exp".to_string()
+        "sigmoid".to_string()
     }
 
     fn f(&self, data: f64) -> f64 {
@@ -24,12 +27,19 @@ impl UnaryFn<f64> for SigmoidFn {
     fn gen_graph(
         &self,
         nodes: &mut Vec<TapeNode<f64>>,
-        idx: u32,
-        _input: u32,
-        _derived: u32,
-    ) -> Option<u32> {
-        let one = add_value(nodes, 1.);
-        let one_minus_sigmoid = add_sub(nodes, one, idx);
+        idx: TapeIndex,
+        _input: TapeIndex,
+        _derived: TapeIndex,
+    ) -> Option<TapeIndex> {
+        // 1 - sigmoid(x) comes up too often in gen_graph that caching it will remove a lot of
+        // redundancy.
+        let one_minus_sigmoid = if let Some(cached) = self.node_cache.get() {
+            cached
+        } else {
+            let cache = add_sub(nodes, TAPE_ONE, idx);
+            self.node_cache.set(Some(cache));
+            cache
+        };
         Some(add_mul(nodes, one_minus_sigmoid, idx))
     }
 }
@@ -37,7 +47,7 @@ impl UnaryFn<f64> for SigmoidFn {
 fn main() {
     let tape = Tape::new();
     let a = tape.term("a", 1.23);
-    let sin_a = (a).apply_t(Box::new(SigmoidFn));
+    let sin_a = (a).apply_t(Box::new(SigmoidFn::default()));
 
     let mut csv = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     let mut derivatives = vec![sin_a];

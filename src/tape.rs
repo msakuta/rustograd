@@ -19,6 +19,10 @@ pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
 }
 
+pub type TapeIndex = u32;
+pub const TAPE_ZERO: TapeIndex = 0;
+pub const TAPE_ONE: TapeIndex = 1;
+
 #[derive(Debug)]
 pub struct TapeNode<T> {
     name: String,
@@ -425,7 +429,11 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
     Some(grad)
 }
 
-fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeValue<T>) -> u32 {
+fn add_node<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    name: String,
+    value: TapeValue<T>,
+) -> TapeIndex {
     let new_idx = nodes.len();
     nodes.push(TapeNode {
         name,
@@ -433,31 +441,43 @@ fn add_node<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, name: String, value: TapeVa
         data: None,
         grad: None,
     });
-    new_idx as u32
+    new_idx as TapeIndex
 }
 
-pub fn add_value<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, val: T) -> u32 {
+pub fn add_value<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, val: T) -> TapeIndex {
     let name = format!("{val}");
     add_node(nodes, name, TapeValue::Value(val))
 }
 
-pub fn add_add<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+pub fn add_add<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
     let name = format!(
-        "{} + {}",
+        "({} + {})",
         nodes[lhs as usize].name, nodes[rhs as usize].name
     );
     add_node(nodes, name, TapeValue::Add(lhs, rhs))
 }
 
-pub fn add_sub<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+pub fn add_sub<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
     let name = format!(
-        "{} - {}",
+        "({} - {})",
         nodes[lhs as usize].name, nodes[rhs as usize].name
     );
     add_node(nodes, name, TapeValue::Sub(lhs, rhs))
 }
 
-pub fn add_mul<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+pub fn add_mul<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
     let name = format!(
         "{} * {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -465,7 +485,7 @@ pub fn add_mul<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u
     add_node(nodes, name, TapeValue::Mul(lhs, rhs))
 }
 
-fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
+fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeIndex) -> TapeIndex {
     let name = format!(
         "{} / {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -473,7 +493,7 @@ fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: u32, rhs: u32) -> u32 {
     add_node(nodes, name, TapeValue::Div(lhs, rhs))
 }
 
-fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: u32) -> u32 {
+fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex) -> TapeIndex {
     let name = format!("-{}", nodes[node as usize].name);
     add_node(nodes, name, TapeValue::Neg(node))
 }
@@ -481,8 +501,8 @@ fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: u32) -> u32 {
 pub fn add_unary_fn<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     f: Box<dyn UnaryFn<T>>,
-    node: u32,
-) -> u32 {
+    node: TapeIndex,
+) -> TapeIndex {
     let name = format!("{}({})", f.name(), nodes[node as usize].name);
     add_node(
         nodes,

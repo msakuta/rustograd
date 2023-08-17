@@ -1,4 +1,4 @@
-use crate::tape::TapeNode;
+use crate::tape::{TapeIndex, TapeNode};
 
 /// A trait that represents an unary operation on a value.
 /// It needs to implement a transformation of the value, the gradient
@@ -16,10 +16,10 @@ pub trait UnaryFn<T> {
     fn gen_graph(
         &self,
         _nodes: &mut Vec<TapeNode<T>>,
-        _this: u32,
-        _input: u32,
-        _derived: u32,
-    ) -> Option<u32> {
+        _this: TapeIndex,
+        _input: TapeIndex,
+        _derived: TapeIndex,
+    ) -> Option<TapeIndex> {
         None
     }
 }
