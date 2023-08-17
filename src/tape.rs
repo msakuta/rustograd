@@ -453,6 +453,22 @@ fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: u32) -> u32 {
     add_node(nodes, name, TapeValue::Neg(node))
 }
 
+pub fn add_unary_fn<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    f: Box<dyn UnaryFn<T>>,
+    node: u32,
+) -> u32 {
+    let name = format!("{}({})", f.name(), nodes[node as usize].name);
+    add_node(
+        nodes,
+        name,
+        TapeValue::UnaryFn(UnaryFnPayload {
+            term: node,
+            f: Some(f),
+        }),
+    )
+}
+
 fn gen_graph<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     derive_map: &mut HashMap<u32, u32>,
