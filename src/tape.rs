@@ -1,7 +1,7 @@
 //! Implementation of shared memory arena for the terms, aka a tape.
 //! See https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
-use std::{cell::RefCell, collections::HashMap, io::Write};
+use std::{cell::RefCell, io::Write};
 
 use crate::{
     error::ValueNotDefinedError,
@@ -17,7 +17,6 @@ use crate::{
 /// Also the deallocation is much faster because it merely frees the dynamic array once.
 pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
-    derive_map: RefCell<HashMap<u32, u32>>,
 }
 
 #[derive(Debug)]
@@ -102,7 +101,28 @@ impl<'a, T> Copy for TapeTerm<'a, T> {}
 
 impl<T: Tensor> Tape<T> {
     pub fn new() -> Self {
-        Self::default()
+        // The first and the second entries in a tape are reserved for 0 (additive identity)
+        // and 1 (multiplicative identity) to make generating graph more efficiently.
+        // We pay 2 elements worth of allocation for every tape in exchange, but I think
+        // it is a fair trade, because autograd is usually used with complex expression
+        // (if your expression is simple enough that just 2 pre-allocaed nodes can be
+        // an overhead, why would you need autograd in the first place?)
+        Self {
+            nodes: RefCell::new(vec![
+                TapeNode {
+                    name: "0".to_string(),
+                    value: TapeValue::Value(T::default()),
+                    data: Some(T::default()),
+                    grad: Some(T::default()),
+                },
+                TapeNode {
+                    name: "1".to_string(),
+                    value: TapeValue::Value(T::one()),
+                    data: Some(T::one()),
+                    grad: Some(T::default()),
+                },
+            ]),
+        }
     }
 
     pub fn term<'a>(&'a self, name: impl Into<String>, init: T) -> TapeTerm<'a, T> {
@@ -237,8 +257,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn gen_graph(&self, var: &Self) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
-            let mut derive_map = self.tape.derive_map.borrow_mut();
-            gen_graph(&mut nodes, &mut derive_map, self.idx, var.idx)
+            gen_graph(&mut nodes, self.idx, var.idx)
         };
         new_node.map(|idx| TapeTerm {
             tape: self.tape,
@@ -475,30 +494,19 @@ pub fn add_unary_fn<T: Tensor>(
     )
 }
 
-fn gen_graph<T: Tensor>(
-    nodes: &mut Vec<TapeNode<T>>,
-    derive_map: &mut HashMap<u32, u32>,
-    idx: u32,
-    wrt: u32,
-) -> Option<u32> {
+fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Option<u32> {
     use TapeValue::*;
-    if let Some(derived) = derive_map.get(&idx) {
-        return Some(*derived);
-    }
     match nodes[idx as usize].value {
         Value(_) => {
             if idx == wrt {
-                let new_name = format!("d {}", nodes[idx as usize].name);
-                let node = add_node(nodes, new_name, Value(T::one()));
-                derive_map.insert(idx, node);
-                Some(node)
+                Some(1)
             } else {
                 None
             }
         }
         Add(lhs, rhs) => {
-            let lhs = gen_graph(nodes, derive_map, lhs, wrt);
-            let rhs = gen_graph(nodes, derive_map, rhs, wrt);
+            let lhs = gen_graph(nodes, lhs, wrt);
+            let rhs = gen_graph(nodes, rhs, wrt);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(rhs),
@@ -507,8 +515,8 @@ fn gen_graph<T: Tensor>(
             }
         }
         Sub(lhs, rhs) => {
-            let lhs = gen_graph(nodes, derive_map, lhs, wrt);
-            let rhs = gen_graph(nodes, derive_map, rhs, wrt);
+            let lhs = gen_graph(nodes, lhs, wrt);
+            let rhs = gen_graph(nodes, rhs, wrt);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(add_neg(nodes, rhs)),
@@ -517,8 +525,8 @@ fn gen_graph<T: Tensor>(
             }
         }
         Mul(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, derive_map, lhs, wrt);
-            let drhs = gen_graph(nodes, derive_map, rhs, wrt);
+            let dlhs = gen_graph(nodes, lhs, wrt);
+            let drhs = gen_graph(nodes, rhs, wrt);
             match (dlhs, drhs) {
                 (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs)),
                 (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs)),
@@ -532,8 +540,8 @@ fn gen_graph<T: Tensor>(
             }
         }
         Div(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, derive_map, lhs, wrt);
-            let drhs = gen_graph(nodes, derive_map, rhs, wrt);
+            let dlhs = gen_graph(nodes, lhs, wrt);
+            let drhs = gen_graph(nodes, rhs, wrt);
             match (dlhs, drhs) {
                 (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs)),
                 (None, Some(drhs)) => {
@@ -552,10 +560,10 @@ fn gen_graph<T: Tensor>(
                 _ => None,
             }
         }
-        Neg(term) => gen_graph(nodes, derive_map, term, wrt).map(|node| add_neg(nodes, node)),
+        Neg(term) => gen_graph(nodes, term, wrt).map(|node| add_neg(nodes, node)),
         UnaryFn(UnaryFnPayload { term, ref mut f }) => {
             let taken_f = f.take();
-            let derived = gen_graph(nodes, derive_map, term, wrt);
+            let derived = gen_graph(nodes, term, wrt);
             let ret = derived.and_then(|derived| {
                 taken_f
                     .as_ref()

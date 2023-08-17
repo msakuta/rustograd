@@ -30,10 +30,16 @@ impl UnaryFn<f64> for PolynomialFn {
     ) -> Option<u32> {
         if self.0 == 0 {
             None
-        } else {
-            let poly = add_unary_fn(nodes, Box::new(Self(self.0 - 1)), input);
+        } else if 1 < self.0 {
+            let poly = if self.0 == 2 {
+                input
+            } else {
+                add_unary_fn(nodes, Box::new(Self(self.0 - 1)), input)
+            };
             let factor = add_value(nodes, self.0 as f64);
             Some(add_mul(nodes, factor, poly))
+        } else {
+            Some(1)
         }
     }
 }
@@ -46,7 +52,7 @@ fn main() {
     let mut csv = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     let mut derivatives = vec![sin_a];
     let mut next = sin_a;
-    write!(csv, "x, $x^3)$, ").unwrap();
+    write!(csv, "x, $x^3$, ").unwrap();
     for i in 1..4 {
         let Some(next_i) = next.gen_graph(&a) else { break };
         next = next_i;
@@ -56,7 +62,7 @@ fn main() {
     writeln!(csv, "").unwrap();
 
     for i in -50..50 {
-        let x = i as f64 * 0.1;
+        let x = i as f64 * 0.02;
         a.set(x).unwrap();
         write!(csv, "{x}, ").unwrap();
         for d in &derivatives {
