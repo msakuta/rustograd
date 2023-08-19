@@ -1,3 +1,5 @@
+use crate::tape::{TapeIndex, TapeNode};
+
 /// A trait that represents an unary operation on a value.
 /// It needs to implement a transformation of the value, the gradient
 /// and its reverse transformation (transposition).
@@ -7,6 +9,22 @@ pub trait UnaryFn<T> {
     fn grad(&self, data: T) -> T;
     fn t(&self, data: T) -> T {
         data
+    }
+
+    /// A method to generate a graph node that represents differentiation of this node.
+    /// It takes 3 parameters:
+    ///
+    /// * `input` - a node that comes as an input variable of this node, e.g. x in exp(x).
+    /// * `output` - a node that outputs the evaluated result, e.g. exp(x) itself in exp(x).
+    /// * `derived` - a node representing a derived input, that is, x'.
+    fn gen_graph(
+        &self,
+        _nodes: &mut Vec<TapeNode<T>>,
+        _input: TapeIndex,
+        _output: TapeIndex,
+        _derived: TapeIndex,
+    ) -> Option<TapeIndex> {
+        None
     }
 }
 

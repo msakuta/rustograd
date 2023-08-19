@@ -19,6 +19,10 @@ pub struct Tape<T = f64> {
     nodes: RefCell<Vec<TapeNode<T>>>,
 }
 
+pub type TapeIndex = u32;
+pub const TAPE_ZERO: TapeIndex = 0;
+pub const TAPE_ONE: TapeIndex = 1;
+
 #[derive(Debug)]
 pub struct TapeNode<T> {
     name: String,
@@ -29,7 +33,7 @@ pub struct TapeNode<T> {
 
 struct UnaryFnPayload<T> {
     term: u32,
-    f: Box<dyn UnaryFn<T>>,
+    f: Option<Box<dyn UnaryFn<T>>>,
 }
 
 impl<T> std::fmt::Debug for UnaryFnPayload<T> {
@@ -101,7 +105,28 @@ impl<'a, T> Copy for TapeTerm<'a, T> {}
 
 impl<T: Tensor> Tape<T> {
     pub fn new() -> Self {
-        Self::default()
+        // The first and the second entries in a tape are reserved for 0 (additive identity)
+        // and 1 (multiplicative identity) to make generating graph more efficiently.
+        // We pay 2 elements worth of allocation for every tape in exchange, but I think
+        // it is a fair trade, because autograd is usually used with complex expression
+        // (if your expression is simple enough that just 2 pre-allocaed nodes can be
+        // an overhead, why would you need autograd in the first place?)
+        Self {
+            nodes: RefCell::new(vec![
+                TapeNode {
+                    name: "0".to_string(),
+                    value: TapeValue::Value(T::default()),
+                    data: Some(T::default()),
+                    grad: Some(T::default()),
+                },
+                TapeNode {
+                    name: "1".to_string(),
+                    value: TapeValue::Value(T::one()),
+                    data: Some(T::one()),
+                    grad: Some(T::default()),
+                },
+            ]),
+        }
     }
 
     pub fn term<'a>(&'a self, name: impl Into<String>, init: T) -> TapeTerm<'a, T> {
@@ -233,6 +258,28 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         }
     }
 
+    pub fn gen_graph(&self, var: &Self) -> Option<Self> {
+        let new_node = {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            gen_graph(&mut nodes, self.idx, var.idx, &|_, _, _| ())
+        };
+        new_node.map(|idx| TapeTerm {
+            tape: self.tape,
+            idx,
+        })
+    }
+
+    pub fn gen_graph_cb(&self, var: &Self, cb: &impl Fn(&[TapeNode<T>], u32, u32)) -> Option<Self> {
+        let new_node = {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            gen_graph(&mut nodes, self.idx, var.idx, cb)
+        };
+        new_node.map(|idx| TapeTerm {
+            tape: self.tape,
+            idx,
+        })
+    }
+
     pub fn apply(
         &self,
         name: &(impl AsRef<str> + ?Sized),
@@ -245,11 +292,11 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             name,
             TapeValue::UnaryFn(UnaryFnPayload {
                 term: self.idx,
-                f: Box::new(PtrUnaryFn {
+                f: Some(Box::new(PtrUnaryFn {
                     name: self_name,
                     f,
                     grad,
-                }),
+                })),
             }),
         )
     }
@@ -260,7 +307,10 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         let name = format!("{}({})", f.name(), self_name);
         self.tape.term_name(
             name,
-            TapeValue::UnaryFn(UnaryFnPayload { term: self.idx, f }),
+            TapeValue::UnaryFn(UnaryFnPayload {
+                term: self.idx,
+                f: Some(f),
+            }),
         )
     }
 
@@ -301,6 +351,8 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             show_values: false,
             vertical: false,
             hilight: None,
+            connect_to: None,
+            precision: 2,
         }
     }
 
@@ -341,7 +393,7 @@ fn eval<T: Tensor + 'static>(
             let UnaryFn(UnaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
                 unreachable!()
             };
-            f.f(val)
+            f.as_ref().unwrap().f(val)
         }
     };
     nodes[idx as usize].data = Some(data.clone());
@@ -383,10 +435,190 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T>
         }
         Neg(term) => -derive(nodes, term, wrt)?,
         UnaryFn(UnaryFnPayload { term, ref f }) => {
-            f.grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+            f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
     };
     Some(grad)
+}
+
+fn add_node<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    name: String,
+    value: TapeValue<T>,
+) -> TapeIndex {
+    let new_idx = nodes.len();
+    nodes.push(TapeNode {
+        name,
+        value,
+        data: None,
+        grad: None,
+    });
+    new_idx as TapeIndex
+}
+
+pub fn add_value<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, val: T) -> TapeIndex {
+    let name = format!("{val}");
+    add_node(nodes, name, TapeValue::Value(val))
+}
+
+pub fn add_add<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
+    let name = format!(
+        "({} + {})",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Add(lhs, rhs))
+}
+
+pub fn add_sub<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
+    let name = format!(
+        "({} - {})",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Sub(lhs, rhs))
+}
+
+pub fn add_mul<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
+    let name = format!(
+        "{} * {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Mul(lhs, rhs))
+}
+
+fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeIndex) -> TapeIndex {
+    let name = format!(
+        "{} / {}",
+        nodes[lhs as usize].name, nodes[rhs as usize].name
+    );
+    add_node(nodes, name, TapeValue::Div(lhs, rhs))
+}
+
+fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex) -> TapeIndex {
+    let name = format!("-{}", nodes[node as usize].name);
+    add_node(nodes, name, TapeValue::Neg(node))
+}
+
+pub fn add_unary_fn<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    f: Box<dyn UnaryFn<T>>,
+    node: TapeIndex,
+) -> TapeIndex {
+    let name = format!("{}({})", f.name(), nodes[node as usize].name);
+    add_node(
+        nodes,
+        name,
+        TapeValue::UnaryFn(UnaryFnPayload {
+            term: node,
+            f: Some(f),
+        }),
+    )
+}
+
+fn gen_graph<T: Tensor + 'static>(
+    nodes: &mut Vec<TapeNode<T>>,
+    idx: u32,
+    wrt: u32,
+    cb: &impl Fn(&[TapeNode<T>], u32, u32),
+) -> Option<u32> {
+    use TapeValue::*;
+    let ret = match nodes[idx as usize].value {
+        Value(_) => {
+            if idx == wrt {
+                Some(1)
+            } else {
+                None
+            }
+        }
+        Add(lhs, rhs) => {
+            let lhs = gen_graph(nodes, lhs, wrt, cb);
+            let rhs = gen_graph(nodes, rhs, wrt, cb);
+            match (lhs, rhs) {
+                (Some(lhs), None) => Some(lhs),
+                (None, Some(rhs)) => Some(rhs),
+                (Some(lhs), Some(rhs)) => Some(add_add(nodes, lhs, rhs)),
+                _ => None,
+            }
+        }
+        Sub(lhs, rhs) => {
+            let lhs = gen_graph(nodes, lhs, wrt, cb);
+            let rhs = gen_graph(nodes, rhs, wrt, cb);
+            match (lhs, rhs) {
+                (Some(lhs), None) => Some(lhs),
+                (None, Some(rhs)) => Some(add_neg(nodes, rhs)),
+                (Some(lhs), Some(rhs)) => Some(add_sub(nodes, lhs, rhs)),
+                _ => None,
+            }
+        }
+        Mul(lhs, rhs) => {
+            let dlhs = gen_graph(nodes, lhs, wrt, cb);
+            let drhs = gen_graph(nodes, rhs, wrt, cb);
+            match (dlhs, drhs) {
+                (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs)),
+                (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs)),
+                (Some(dlhs), Some(drhs)) => {
+                    let plhs = add_mul(nodes, dlhs, rhs);
+                    let prhs = add_mul(nodes, lhs, drhs);
+                    let node = add_add(nodes, plhs, prhs);
+                    Some(node)
+                }
+                _ => None,
+            }
+        }
+        Div(lhs, rhs) => {
+            let dlhs = gen_graph(nodes, lhs, wrt, cb);
+            let drhs = gen_graph(nodes, rhs, wrt, cb);
+            match (dlhs, drhs) {
+                (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs)),
+                (None, Some(drhs)) => {
+                    let node = add_mul(nodes, lhs, drhs);
+                    let node = add_div(nodes, node, rhs);
+                    let node = add_div(nodes, node, rhs);
+                    Some(add_neg(nodes, node))
+                }
+                (Some(dlhs), Some(drhs)) => {
+                    let plhs = add_div(nodes, dlhs, rhs);
+                    let node = add_mul(nodes, lhs, drhs);
+                    let prhs = add_div(nodes, node, rhs);
+                    let prhs = add_div(nodes, prhs, rhs);
+                    Some(add_sub(nodes, plhs, prhs))
+                }
+                _ => None,
+            }
+        }
+        Neg(term) => gen_graph(nodes, term, wrt, cb).map(|node| add_neg(nodes, node)),
+        UnaryFn(UnaryFnPayload { term, ref mut f }) => {
+            let taken_f = f.take();
+            let derived = gen_graph(nodes, term, wrt, cb);
+            let ret = derived.and_then(|derived| {
+                taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, term, idx, derived)
+            });
+            if let UnaryFn(UnaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
+                *f = taken_f;
+            } else {
+                unreachable!()
+            }
+            ret
+        }
+    };
+    if let Some(generated) = ret {
+        cb(nodes, idx, generated);
+    }
+    ret
 }
 
 fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
@@ -447,6 +679,7 @@ fn backprop_rec<T: Tensor>(
             Neg(term) => backprop_set(nodes, term, -grad, callback),
             UnaryFn(UnaryFnPayload { term, ref f }) => {
                 let val = value(nodes, term).ok_or(ValueNotDefinedError)?;
+                let f = f.as_ref().unwrap();
                 let newgrad = grad * f.grad(val);
                 let endgrad = f.t(newgrad);
                 backprop_set(nodes, term, endgrad, callback)
@@ -461,7 +694,9 @@ pub struct TapeDotBuilder<'a, T: Default> {
     this: TapeTerm<'a, T>,
     show_values: bool,
     vertical: bool,
-    hilight: Option<u32>,
+    hilight: Option<TapeIndex>,
+    connect_to: Option<TapeIndex>,
+    precision: usize,
 }
 
 impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
@@ -482,6 +717,18 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
         self
     }
 
+    /// Specify the node that has connection from highlighted node.
+    pub fn connect_to(mut self, term: u32) -> Self {
+        self.connect_to = Some(term);
+        self
+    }
+
+    /// Set floating point precision after decimal point
+    pub fn precision(mut self, precision: usize) -> Self {
+        self.precision = precision;
+        self
+    }
+
     /// Perform output of dot file
     pub fn dot(self, writer: &mut impl Write) -> std::io::Result<()> {
         let nodes = self.this.tape.nodes.borrow();
@@ -495,7 +742,8 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     ) -> std::io::Result<()> {
         writeln!(
             writer,
-            "digraph G {{\nrankdir=\"{}\";",
+            "digraph G {{\nrankdir=\"{}\";
+            newrank=true;",
             if self.vertical { "TB" } else { "LR" }
         )?;
         for (id, term) in nodes.iter().enumerate() {
@@ -512,15 +760,16 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
                 ""
             };
             let label = if self.show_values {
+                let formatter = |v| format!("{v:.precision$}", precision = self.precision);
                 format!(
                     "\\ndata:{}, grad:{}",
                     term.data
                         .as_ref()
-                        .map(|v| format!("{v}"))
+                        .map(formatter)
                         .unwrap_or_else(|| "None".into()),
                     term.grad
                         .as_ref()
-                        .map(|v| format!("{v:0.2}"))
+                        .map(formatter)
                         .unwrap_or_else(|| "None".into())
                 )
             } else {
@@ -546,6 +795,13 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
             for pid in parents.into_iter().filter_map(|v| v) {
                 writeln!(writer, "a{} -> a{};", pid, id)?;
             }
+        }
+        if let Some((from, to)) = self.hilight.zip(self.connect_to) {
+            writeln!(
+                writer,
+                "a{} -> a{} [ style=\"dashed,bold\" color=green constraint=false ];",
+                from, to
+            )?;
         }
         writeln!(writer, "}}")?;
         Ok(())

@@ -2,7 +2,7 @@ mod dnum;
 mod dvec;
 pub mod error;
 mod rc_term;
-mod tape;
+pub mod tape;
 mod tensor;
 mod term;
 mod unary_fn;
