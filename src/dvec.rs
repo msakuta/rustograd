@@ -185,7 +185,7 @@ impl<T: Tensor> std::ops::Neg for &Dvec<T> {
 #[test]
 fn test_dvec() {
     let d1 = Dvec::new_n(0., 1., 1);
-    assert_eq!(d1.D(), Dvec::new_n(1., 0., 0));
+    assert_eq!(d1.d(), Dvec::new_n(1., 0., 0));
     let d2 = Dvec::new_n(2., 0., 0);
     let d3 = &d1 + &d2;
     assert_eq!(d3, Dvec::new_n(2., 0., 0));

@@ -82,7 +82,7 @@ fn test_dual() {
     assert_eq!(d4 * d5, Dnum::<2>::new(10., 40.));
 }
 
-fn choose(n: usize, k: usize) -> usize {
+pub(crate) fn choose(n: usize, k: usize) -> usize {
     assert!(k <= n);
     let mut res = 1;
     for i in 0..k {

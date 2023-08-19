@@ -6,7 +6,7 @@ fn main() {
     let mut f = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     writeln!(
         f,
-        "x, exp(-x^2), d exp(-x^2)/dx, d^2 exp(-x^2)/dx^2, d^3 exp(-x^2)/dx^3"
+        "x, exp(-x^2), d exp(-x^2)/dx, d^2 exp(-x^2)/dx^2, d^3 exp(-x^2)/dx^3,"
     )
     .unwrap();
     for i in -40..40 {
