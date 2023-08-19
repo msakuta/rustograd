@@ -67,6 +67,20 @@ impl<const N: usize> std::ops::Mul for Dnum<N> {
     }
 }
 
+impl<const N: usize> std::ops::Div for Dnum<N> {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        if rhs.is_real() {
+            self / rhs.f[0]
+        } else {
+            let crhs = rhs.conjugate();
+            let denom = rhs * crhs.clone();
+            assert!(denom.is_real());
+            (self * crhs) / denom.f[0]
+        }
+    }
+}
+
 #[test]
 fn test_dual() {
     let d1 = Dnum::<2>::new(1., 2.);
@@ -78,8 +92,12 @@ fn test_dual() {
     assert_eq!(d3 / 2., Dnum::<3> { f: [0.5, 1., 1.5] });
 
     let d4 = Dnum::<2>::new(1., 2.);
-    let d5 = Dnum::<2>::new(10., 20.);
-    assert_eq!(d4 * d5, Dnum::<2>::new(10., 40.));
+    let d5 = Dnum::<2>::new(20., -10.);
+    assert_eq!(d4 * d5, Dnum::<2>::new(20., 30.));
+    assert_eq!(d4 * d5, d5 * d4);
+    assert!(!d4.is_real());
+    assert!(!d5.is_real());
+    assert_eq!(d5 / d4, Dnum::<2>::new(20., -50.));
 }
 
 pub(crate) fn choose(n: usize, k: usize) -> usize {
