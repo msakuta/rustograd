@@ -76,7 +76,7 @@ fn main() {
         .unwrap()
         .dot_builder()
         .vertical(true)
-        .show_values(true)
+        .show_values(false)
         .precision(4)
         .dot(&mut writer)
         .unwrap();

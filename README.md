@@ -187,6 +187,26 @@ fn sin(x: f64) -> f64 { x.sin() }
 fn sin_derive(x: f64) -> f64 { x.cos() }
 ```
 
+## Generating derived sub-graph for higher order differentiation
+
+You can use `TapeTerm::gen_graph()` method to generate a node that represents a new sub-expression which has differentiation of the original variable.
+This can be applied recursively to generate higher order differentiation, or even mixed order of differentiations in an expression.
+For example, you can represent a function like below.
+
+$$
+f(x) = g(x) + \frac{\partial g(x)}{\partial x}
+$$
+
+The plot below shows a series of higher order differentiation on a Gaussian function.
+
+![higher order Gaussian differentiations](images/higher-order-gaussian.png)
+
+To use this feature, you need to provide with an implementation of a trait called `UnaryFn` for the functions.
+See [the example code](examples/tape_gen_graph_gaussian.rs) for how to do that.
+
+Note that this feature is not implemented in `RcTerm` yet.
+
+
 ## `Dvec` type for higher order differentiation
 
 `*Term` types do not support higher order differentiation. It's hard to support them in reverse-mode automatic differentiation, and they require a buffer size proportional to the maximum order of differentiation you would want to calculate, so it is inefficient to allocate memory for all of them.
