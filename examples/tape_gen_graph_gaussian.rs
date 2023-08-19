@@ -36,14 +36,32 @@ fn main() {
     let a = tape.term("a", 1.23);
     let exp_a = (-a * a).apply_t(Box::new(ExpFn));
 
+    let next = std::cell::Cell::new(exp_a);
+
+    let counter = std::cell::Cell::new(0);
+    let callback = |nodes: &_, idx, generated| {
+        let i = counter.get();
+        let mut file =
+            std::io::BufWriter::new(std::fs::File::create(format!("dot{i}.dot")).unwrap());
+        next.get()
+            .dot_builder()
+            .vertical(true)
+            .show_values(false)
+            .highlights(idx)
+            .connect_to(generated)
+            .dot_borrowed(nodes, &mut file)
+            .unwrap();
+        counter.set(i + 1);
+    };
+
     let mut csv = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     let mut derivatives = vec![exp_a];
-    let mut next = exp_a;
     write!(csv, "x, $e^x$, ").unwrap();
     for i in 1..4 {
-        next = next.gen_graph(&a).unwrap();
-        derivatives.push(next);
+        let next_node = next.get().gen_graph_cb(&a, &callback).unwrap();
+        derivatives.push(next_node);
         write!(csv, "$(d^{i} \\exp(-x^2)/(d x^{i})$, ").unwrap();
+        next.set(next_node);
     }
     writeln!(csv, "").unwrap();
 

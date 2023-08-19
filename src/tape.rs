@@ -261,7 +261,18 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn gen_graph(&self, var: &Self) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
-            gen_graph(&mut nodes, self.idx, var.idx)
+            gen_graph(&mut nodes, self.idx, var.idx, &|_, _, _| ())
+        };
+        new_node.map(|idx| TapeTerm {
+            tape: self.tape,
+            idx,
+        })
+    }
+
+    pub fn gen_graph_cb(&self, var: &Self, cb: &impl Fn(&[TapeNode<T>], u32, u32)) -> Option<Self> {
+        let new_node = {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            gen_graph(&mut nodes, self.idx, var.idx, cb)
         };
         new_node.map(|idx| TapeTerm {
             tape: self.tape,
@@ -340,6 +351,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             show_values: false,
             vertical: false,
             hilight: None,
+            connect_to: None,
             precision: 2,
         }
     }
@@ -514,9 +526,14 @@ pub fn add_unary_fn<T: Tensor>(
     )
 }
 
-fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Option<u32> {
+fn gen_graph<T: Tensor + 'static>(
+    nodes: &mut Vec<TapeNode<T>>,
+    idx: u32,
+    wrt: u32,
+    cb: &impl Fn(&[TapeNode<T>], u32, u32),
+) -> Option<u32> {
     use TapeValue::*;
-    match nodes[idx as usize].value {
+    let ret = match nodes[idx as usize].value {
         Value(_) => {
             if idx == wrt {
                 Some(1)
@@ -525,8 +542,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Add(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt);
-            let rhs = gen_graph(nodes, rhs, wrt);
+            let lhs = gen_graph(nodes, lhs, wrt, cb);
+            let rhs = gen_graph(nodes, rhs, wrt, cb);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(rhs),
@@ -535,8 +552,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Sub(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt);
-            let rhs = gen_graph(nodes, rhs, wrt);
+            let lhs = gen_graph(nodes, lhs, wrt, cb);
+            let rhs = gen_graph(nodes, rhs, wrt, cb);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(add_neg(nodes, rhs)),
@@ -545,8 +562,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Mul(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, lhs, wrt);
-            let drhs = gen_graph(nodes, rhs, wrt);
+            let dlhs = gen_graph(nodes, lhs, wrt, cb);
+            let drhs = gen_graph(nodes, rhs, wrt, cb);
             match (dlhs, drhs) {
                 (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs)),
                 (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs)),
@@ -560,8 +577,8 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
         }
         Div(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, lhs, wrt);
-            let drhs = gen_graph(nodes, rhs, wrt);
+            let dlhs = gen_graph(nodes, lhs, wrt, cb);
+            let drhs = gen_graph(nodes, rhs, wrt, cb);
             match (dlhs, drhs) {
                 (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs)),
                 (None, Some(drhs)) => {
@@ -580,10 +597,10 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
                 _ => None,
             }
         }
-        Neg(term) => gen_graph(nodes, term, wrt).map(|node| add_neg(nodes, node)),
+        Neg(term) => gen_graph(nodes, term, wrt, cb).map(|node| add_neg(nodes, node)),
         UnaryFn(UnaryFnPayload { term, ref mut f }) => {
             let taken_f = f.take();
-            let derived = gen_graph(nodes, term, wrt);
+            let derived = gen_graph(nodes, term, wrt, cb);
             let ret = derived.and_then(|derived| {
                 taken_f
                     .as_ref()
@@ -597,7 +614,11 @@ fn gen_graph<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, idx: u32, wrt: u32) -> Opt
             }
             ret
         }
+    };
+    if let Some(generated) = ret {
+        cb(nodes, idx, generated);
     }
+    ret
 }
 
 fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
@@ -673,7 +694,8 @@ pub struct TapeDotBuilder<'a, T: Default> {
     this: TapeTerm<'a, T>,
     show_values: bool,
     vertical: bool,
-    hilight: Option<u32>,
+    hilight: Option<TapeIndex>,
+    connect_to: Option<TapeIndex>,
     precision: usize,
 }
 
@@ -692,6 +714,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Set a term to show highlighted border around it.
     pub fn highlights(mut self, term: u32) -> Self {
         self.hilight = Some(term);
+        self
+    }
+
+    /// Specify the node that has connection from highlighted node.
+    pub fn connect_to(mut self, term: u32) -> Self {
+        self.connect_to = Some(term);
         self
     }
 
@@ -714,7 +742,8 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     ) -> std::io::Result<()> {
         writeln!(
             writer,
-            "digraph G {{\nrankdir=\"{}\";",
+            "digraph G {{\nrankdir=\"{}\";
+            newrank=true;",
             if self.vertical { "TB" } else { "LR" }
         )?;
         for (id, term) in nodes.iter().enumerate() {
@@ -766,6 +795,13 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
             for pid in parents.into_iter().filter_map(|v| v) {
                 writeln!(writer, "a{} -> a{};", pid, id)?;
             }
+        }
+        if let Some((from, to)) = self.hilight.zip(self.connect_to) {
+            writeln!(
+                writer,
+                "a{} -> a{} [ style=\"dashed,bold\" color=green constraint=false ];",
+                from, to
+            )?;
         }
         writeln!(writer, "}}")?;
         Ok(())
