@@ -8,8 +8,8 @@ mod tensor;
 mod term;
 mod unary_fn;
 
-pub use dnum_n2::Dnum2;
 pub use dnum::Dnum;
+pub use dnum_n2::Dnum2;
 pub use dvec::Dvec;
 pub use rc_term::{RcDotBuilder, RcTerm};
 pub use tape::{Tape, TapeTerm};

@@ -27,7 +27,7 @@ impl<const N: usize> Dnum2<N> {
     }
 
     pub fn conjugate(&self) -> Self {
-        let mut res = self
+        let res = self
             .f
             .iter()
             .enumerate()
@@ -106,6 +106,20 @@ impl<const N: usize> std::ops::Mul for Dnum2<N> {
     }
 }
 
+impl<const N: usize> std::ops::Div for Dnum2<N> {
+    type Output = Self;
+    fn div(self, rhs: Self) -> Self::Output {
+        if rhs.is_real() {
+            self / rhs.f[0]
+        } else {
+            let crhs = rhs.conjugate();
+            let denom = rhs * crhs.clone();
+            assert!(denom.is_real());
+            (self * crhs) / denom.f[0]
+        }
+    }
+}
+
 #[test]
 fn test_dual() {
     let d1 = Dnum2::<2>::new(1., 2., 3.);
@@ -129,6 +143,10 @@ fn test_dual() {
     );
 
     let d4 = Dnum2::<2>::new(1., 2., 3.);
-    let d5 = Dnum2::<2>::new(10., 20., 30.);
-    assert_eq!(d4 * d5, Dnum2::<2>::new(10., 40., 60.));
+    let d5 = Dnum2::<2>::new(30., 20., 10.);
+    assert_eq!(d4.clone() * d5.clone(), Dnum2::<2>::new(30., 80., 100.));
+    assert_eq!(d4.clone() * d5.clone(), d5.clone() * d4.clone());
+    assert!(!d4.is_real());
+    assert!(!d5.is_real());
+    assert_eq!(d5 / d4, Dnum2::<2>::new(30., -40., -80.));
 }
