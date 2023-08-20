@@ -1,7 +1,7 @@
 use std::io::Write;
 
 use rustograd::{
-    tape::{add_unary_fn, TapeIndex, TapeNode},
+    tape::{add_mul, add_unary_fn, TapeIndex, TapeNode},
     Tape, UnaryFn,
 };
 
@@ -38,16 +38,18 @@ impl UnaryFn<f64> for SinFn {
         nodes: &mut Vec<TapeNode<f64>>,
         input: TapeIndex,
         _output: TapeIndex,
-        _derived: TapeIndex,
+        derived: TapeIndex,
     ) -> Option<TapeIndex> {
-        Some(add_unary_fn(nodes, Box::new(Self(self.0 + 1)), input))
+        let rhs = add_unary_fn(nodes, Box::new(Self(self.0 + 1)), input);
+        Some(add_mul(nodes, derived, rhs))
     }
 }
 
 fn main() {
     let tape = Tape::new();
     let a = tape.term("a", 1.23);
-    let sin_a = (a).apply_t(Box::new(SinFn(0)));
+    let a2 = a * tape.term("b", 1.23);
+    let sin_a = (a2).apply_t(Box::new(SinFn(0)));
 
     let mut csv = std::io::BufWriter::new(std::fs::File::create("data.csv").unwrap());
     let mut derivatives = vec![sin_a];
