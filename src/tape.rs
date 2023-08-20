@@ -89,7 +89,13 @@ enum TapeValue<T> {
 /// ```
 pub struct TapeTerm<'a, T = f64> {
     tape: &'a Tape<T>,
-    idx: u32,
+    idx: TapeIndex,
+}
+
+impl<'a, T> TapeTerm<'a, T> {
+    pub fn to_tape_index(&self) -> TapeIndex {
+        self.idx
+    }
 }
 
 // derive macro doesn't work for generics
@@ -352,6 +358,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             vertical: false,
             hilight: None,
             connect_to: None,
+            output_node: vec![],
             precision: 2,
         }
     }
@@ -696,6 +703,7 @@ pub struct TapeDotBuilder<'a, T: Default> {
     vertical: bool,
     hilight: Option<TapeIndex>,
     connect_to: Option<TapeIndex>,
+    output_node: Vec<(TapeIndex, String)>,
     precision: usize,
 }
 
@@ -720,6 +728,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Specify the node that has connection from highlighted node.
     pub fn connect_to(mut self, term: u32) -> Self {
         self.connect_to = Some(term);
+        self
+    }
+
+    /// Add an output node to indicate in the graph. Useful to distinguish the output in a complex graph.
+    pub fn output_node(mut self, term: TapeIndex, name: impl Into<String>) -> Self {
+        self.output_node.push((term, name.into()));
         self
     }
 
@@ -802,6 +816,10 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
                 "a{} -> a{} [ style=\"dashed,bold\" color=green constraint=false ];",
                 from, to
             )?;
+        }
+        for (i, (output, name)) in self.output_node.iter().enumerate() {
+            writeln!(writer, "output{i} [label=\"{name}\" shape=oval];")?;
+            writeln!(writer, "a{output} -> output{i} [ style=\"bold\" ];",)?;
         }
         writeln!(writer, "}}")?;
         Ok(())
