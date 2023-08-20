@@ -32,7 +32,7 @@ pub struct TapeNode<T> {
 }
 
 struct UnaryFnPayload<T> {
-    term: u32,
+    term: TapeIndex,
     f: Option<Box<dyn UnaryFn<T>>>,
 }
 
@@ -48,11 +48,11 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
 #[derive(Debug)]
 enum TapeValue<T> {
     Value(T),
-    Add(u32, u32),
-    Sub(u32, u32),
-    Mul(u32, u32),
-    Div(u32, u32),
-    Neg(u32),
+    Add(TapeIndex, TapeIndex),
+    Sub(TapeIndex, TapeIndex),
+    Mul(TapeIndex, TapeIndex),
+    Div(TapeIndex, TapeIndex),
+    Neg(TapeIndex),
     UnaryFn(UnaryFnPayload<T>),
 }
 
@@ -146,7 +146,7 @@ impl<T: Tensor> Tape<T> {
         });
         TapeTerm {
             tape: self,
-            idx: idx as u32,
+            idx: idx as TapeIndex,
         }
     }
 
@@ -161,7 +161,7 @@ impl<T: Tensor> Tape<T> {
         });
         TapeTerm {
             tape: self,
-            idx: idx as u32,
+            idx: idx as TapeIndex,
         }
     }
 }
@@ -237,11 +237,11 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear(&mut nodes);
-        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
+        let callback: Option<&fn(&[TapeNode<T>], TapeIndex)> = None;
         eval(&mut nodes, self.idx, callback)
     }
 
-    pub fn eval_cb(&self, callback: &impl Fn(&[TapeNode<T>], u32)) -> T {
+    pub fn eval_cb(&self, callback: &impl Fn(&[TapeNode<T>], TapeIndex)) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear(&mut nodes);
         clear_grad(&mut nodes);
@@ -250,7 +250,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
 
     pub fn eval_noclear(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
-        let callback: Option<&fn(&[TapeNode<T>], u32)> = None;
+        let callback: Option<&fn(&[TapeNode<T>], TapeIndex)> = None;
         eval(&mut nodes, self.idx, callback)
     }
 
@@ -275,7 +275,11 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         })
     }
 
-    pub fn gen_graph_cb(&self, var: &Self, cb: &impl Fn(&[TapeNode<T>], u32, u32)) -> Option<Self> {
+    pub fn gen_graph_cb(
+        &self,
+        var: &Self,
+        cb: &impl Fn(&[TapeNode<T>], TapeIndex, TapeIndex),
+    ) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
             gen_graph(&mut nodes, self.idx, var.idx, cb)
@@ -338,7 +342,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
 
     pub fn backprop_cb(
         &self,
-        callback: &impl Fn(&[TapeNode<T>], u32),
+        callback: &impl Fn(&[TapeNode<T>], TapeIndex),
     ) -> Result<(), ValueNotDefinedError> {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear_grad(&mut nodes);
@@ -380,8 +384,8 @@ fn clear<T: Tensor>(nodes: &mut [TapeNode<T>]) {
 
 fn eval<T: Tensor + 'static>(
     nodes: &mut [TapeNode<T>],
-    idx: u32,
-    callback: Option<&impl Fn(&[TapeNode<T>], u32)>,
+    idx: TapeIndex,
+    callback: Option<&impl Fn(&[TapeNode<T>], TapeIndex)>,
 ) -> T {
     use TapeValue::*;
     if let Some(ref data) = nodes[idx as usize].data {
@@ -410,12 +414,12 @@ fn eval<T: Tensor + 'static>(
     data
 }
 
-fn value<T: Clone>(nodes: &[TapeNode<T>], idx: u32) -> Option<T> {
+fn value<T: Clone>(nodes: &[TapeNode<T>], idx: TapeIndex) -> Option<T> {
     nodes[idx as usize].data.clone()
 }
 
 /// wrt - The variable to derive With Respect To
-fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: u32, wrt: u32) -> Option<T> {
+fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: TapeIndex, wrt: TapeIndex) -> Option<T> {
     use TapeValue::*;
     // println!("derive({}, {}): {:?}", idx, wrt, nodes[idx as usize].value);
     let grad = match nodes[idx as usize].value {
@@ -535,10 +539,10 @@ pub fn add_unary_fn<T: Tensor>(
 
 fn gen_graph<T: Tensor + 'static>(
     nodes: &mut Vec<TapeNode<T>>,
-    idx: u32,
-    wrt: u32,
-    cb: &impl Fn(&[TapeNode<T>], u32, u32),
-) -> Option<u32> {
+    idx: TapeIndex,
+    wrt: TapeIndex,
+    cb: &impl Fn(&[TapeNode<T>], TapeIndex, TapeIndex),
+) -> Option<TapeIndex> {
     use TapeValue::*;
     let ret = match nodes[idx as usize].value {
         Value(_) => {
@@ -636,9 +640,9 @@ fn clear_grad<T: Tensor>(nodes: &mut [TapeNode<T>]) {
 
 fn backprop_set<T: Tensor>(
     nodes: &mut [TapeNode<T>],
-    idx: u32,
+    idx: TapeIndex,
     grad: T,
-    callback: &impl Fn(&[TapeNode<T>], u32),
+    callback: &impl Fn(&[TapeNode<T>], TapeIndex),
 ) {
     if let Some(ref mut node_grad) = nodes[idx as usize].grad {
         *node_grad += grad.clone();
@@ -651,8 +655,8 @@ fn backprop_set<T: Tensor>(
 /// Assign gradient to all nodes
 fn backprop_rec<T: Tensor>(
     nodes: &mut [TapeNode<T>],
-    idx: u32,
-    callback: &impl Fn(&[TapeNode<T>], u32),
+    idx: TapeIndex,
+    callback: &impl Fn(&[TapeNode<T>], TapeIndex),
 ) -> Result<(), ValueNotDefinedError> {
     use TapeValue::*;
     nodes[idx as usize].grad = Some(T::one());
@@ -720,13 +724,13 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     }
 
     /// Set a term to show highlighted border around it.
-    pub fn highlights(mut self, term: u32) -> Self {
+    pub fn highlights(mut self, term: TapeIndex) -> Self {
         self.hilight = Some(term);
         self
     }
 
     /// Specify the node that has connection from highlighted node.
-    pub fn connect_to(mut self, term: u32) -> Self {
+    pub fn connect_to(mut self, term: TapeIndex) -> Self {
         self.connect_to = Some(term);
         self
     }
@@ -768,7 +772,7 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
             } else {
                 ""
             };
-            let border = if self.hilight.is_some_and(|x| x == id as u32) {
+            let border = if self.hilight.is_some_and(|x| x == id as TapeIndex) {
                 " color=red penwidth=2"
             } else {
                 ""
