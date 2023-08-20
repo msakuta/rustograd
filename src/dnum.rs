@@ -18,6 +18,10 @@ impl<const N: usize> Dnum<N> {
         Self { f }
     }
 
+    pub fn from_array(f: [f64; N]) -> Self {
+        Self { f }
+    }
+
     pub fn is_real(&self) -> bool {
         self.f.iter().skip(1).all(|&j| j == 0.)
     }
@@ -29,6 +33,16 @@ impl<const N: usize> Dnum<N> {
         }
         res[0] = self.f[0];
         Self { f: res }
+    }
+
+    pub fn exp(&self) -> Self {
+        let mut result = *self;
+        let ex = self.f[0].exp();
+        result.f[0] = ex;
+        for (i, v) in result.f.iter_mut().enumerate().skip(1) {
+            *v *= ex.powi(i as i32);
+        }
+        result
     }
 }
 
@@ -74,10 +88,25 @@ impl<const N: usize> std::ops::Div for Dnum<N> {
             self / rhs.f[0]
         } else {
             let crhs = rhs.conjugate();
-            let denom = rhs * crhs.clone();
-            assert!(denom.is_real());
-            (self * crhs) / denom.f[0]
+            (self * crhs) / (rhs * crhs)
         }
+    }
+}
+
+impl<const N: usize> std::ops::Neg for Dnum<N> {
+    type Output = Self;
+    fn neg(mut self) -> Self::Output {
+        for v in self.f.iter_mut() {
+            *v = -*v;
+        }
+        self
+    }
+}
+
+impl<const N: usize> std::ops::Index<usize> for Dnum<N> {
+    type Output = f64;
+    fn index(&self, index: usize) -> &Self::Output {
+        &self.f[index]
     }
 }
 
@@ -100,13 +129,20 @@ fn test_dual() {
     assert_eq!(d5 / d4, Dnum::<2>::new(20., -50.));
 }
 
+#[test]
+fn test_dual3() {
+    let d1 = Dnum::<3>::new(1., 2.);
+    let d2 = Dnum::<3>::new(20., -10.);
+    assert_eq!(d2 / d1, Dnum::<3>::from_array([20., -50., 200.]));
+}
+
 pub(crate) fn choose(n: usize, k: usize) -> usize {
     assert!(k <= n);
     let mut res = 1;
     for i in 0..k {
         res *= n - i
     }
-    for i in 1..=k {
+    for i in 2..=k {
         res /= i;
     }
     res

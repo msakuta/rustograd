@@ -114,8 +114,7 @@ impl<const N: usize> std::ops::Div for Dnum2<N> {
         } else {
             let crhs = rhs.conjugate();
             let denom = rhs * crhs.clone();
-            assert!(denom.is_real());
-            (self * crhs) / denom.f[0]
+            (self * crhs) / denom
         }
     }
 }
