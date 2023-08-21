@@ -49,7 +49,7 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
 struct BinaryFnPayload<T> {
     lhs: u32,
     rhs: u32,
-    f: Box<dyn BinaryFn<T>>,
+    f: Option<Box<dyn BinaryFn<T>>>,
 }
 
 impl<T> std::fmt::Debug for BinaryFnPayload<T> {
@@ -350,7 +350,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
             TapeValue::BinaryFn(BinaryFnPayload {
                 lhs: self.idx,
                 rhs: rhs.idx,
-                f,
+                f: Some(f),
             }),
         )
     }
@@ -444,7 +444,7 @@ fn eval<T: Tensor + 'static>(
             let BinaryFn(BinaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
                 unreachable!()
             };
-            f.f(vlhs, vrhs)
+            f.as_ref().unwrap().f(vlhs, vrhs)
         }
     };
     nodes[idx as usize].data = Some(data.clone());
@@ -489,7 +489,9 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: TapeIndex, wrt: TapeIndex) 
             f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
         BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
-            f.grad(value(nodes, lhs)?, value(nodes, rhs)?)
+            f.as_ref()
+                .unwrap()
+                .grad(value(nodes, lhs)?, value(nodes, rhs)?)
                 * derive(nodes, lhs, wrt)?
                 * derive(nodes, rhs, wrt)?
         }
@@ -670,6 +672,36 @@ fn gen_graph<T: Tensor + 'static>(
             }
             ret
         }
+        BinaryFn(BinaryFnPayload {
+            lhs,
+            rhs,
+            ref mut f,
+        }) => {
+            let taken_f = f.take();
+            let dlhs = gen_graph(nodes, lhs, wrt, cb);
+            let drhs = gen_graph(nodes, lhs, wrt, cb);
+            let ret = match (dlhs, drhs) {
+                (Some(dlhs), None) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, lhs, 1, idx, dlhs, 0),
+                (None, Some(drhs)) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, 1, rhs, idx, 0, drhs),
+                (Some(dlhs), Some(drhs)) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, lhs, rhs, idx, dlhs, drhs),
+                _ => None,
+            };
+            if let BinaryFn(BinaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
+                *f = taken_f;
+            } else {
+                unreachable!()
+            }
+            ret
+        }
     };
     if let Some(generated) = ret {
         cb(nodes, idx, generated);
@@ -743,6 +775,7 @@ fn backprop_rec<T: Tensor>(
             BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
                 let vlhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
                 let vrhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let f = f.as_ref().unwrap();
                 let newgrad = grad * f.grad(vlhs, vrhs);
                 let (grad_l, grad_r) = f.t(newgrad);
                 backprop_set(nodes, lhs, grad_l, callback);
