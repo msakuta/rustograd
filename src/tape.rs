@@ -489,11 +489,18 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: TapeIndex, wrt: TapeIndex) 
             f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
         }
         BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
-            f.as_ref()
+            let local_grad = f
+                .as_ref()
                 .unwrap()
-                .grad(value(nodes, lhs)?, value(nodes, rhs)?)
-                * derive(nodes, lhs, wrt)?
-                * derive(nodes, rhs, wrt)?
+                .grad(value(nodes, lhs)?, value(nodes, rhs)?);
+            let dlhs = derive(nodes, lhs, wrt);
+            let drhs = derive(nodes, rhs, wrt);
+            match (dlhs, drhs) {
+                (Some(dlhs), Some(drhs)) => local_grad.1 * drhs + local_grad.0 * dlhs,
+                (None, Some(drhs)) => local_grad.1 * drhs,
+                (Some(dlhs), None) => local_grad.0 * dlhs,
+                _ => return None,
+            }
         }
     };
     Some(grad)
@@ -555,7 +562,11 @@ pub fn add_mul<T: Tensor>(
     add_node(nodes, name, TapeValue::Mul(lhs, rhs))
 }
 
-fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeIndex) -> TapeIndex {
+pub fn add_div<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+) -> TapeIndex {
     let name = format!(
         "{} / {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -563,7 +574,7 @@ fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeInd
     add_node(nodes, name, TapeValue::Div(lhs, rhs))
 }
 
-fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex) -> TapeIndex {
+pub fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex) -> TapeIndex {
     let name = format!("-{}", nodes[node as usize].name);
     add_node(nodes, name, TapeValue::Neg(node))
 }
@@ -776,10 +787,12 @@ fn backprop_rec<T: Tensor>(
                 let vlhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
                 let vrhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
                 let f = f.as_ref().unwrap();
-                let newgrad = grad * f.grad(vlhs, vrhs);
-                let (grad_l, grad_r) = f.t(newgrad);
-                backprop_set(nodes, lhs, grad_l, callback);
-                backprop_set(nodes, rhs, grad_r, callback);
+                let local_grad = f.grad(vlhs, vrhs);
+                let (grad_l, grad_r) = f.t(grad);
+                let newgrad_l = local_grad.0 * grad_l;
+                let newgrad_r = local_grad.1 * grad_r;
+                backprop_set(nodes, lhs, newgrad_l, callback);
+                backprop_set(nodes, rhs, newgrad_r, callback);
             }
         }
     }
