@@ -12,17 +12,19 @@ pub trait UnaryFn<T> {
     }
 
     /// A method to generate a graph node that represents differentiation of this node.
-    /// It takes 3 parameters:
+    /// It takes 4 parameters:
     ///
     /// * `input` - a node that comes as an input variable of this node, e.g. x in exp(x).
     /// * `output` - a node that outputs the evaluated result, e.g. exp(x) itself in exp(x).
     /// * `derived` - a node representing a derived input, that is, x'.
+    /// * `optim` - whether to apply optimization by scanning existing nodes. It may or may not improve performance.
     fn gen_graph(
         &self,
         _nodes: &mut Vec<TapeNode<T>>,
         _input: TapeIndex,
         _output: TapeIndex,
         _derived: TapeIndex,
+        _optim: bool,
     ) -> Option<TapeIndex> {
         None
     }

@@ -267,7 +267,18 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn gen_graph(&self, var: &Self) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
-            gen_graph(&mut nodes, self.idx, var.idx, &|_, _, _| ())
+            gen_graph(&mut nodes, self.idx, var.idx, &|_, _, _| (), false)
+        };
+        new_node.map(|idx| TapeTerm {
+            tape: self.tape,
+            idx,
+        })
+    }
+
+    pub fn gen_graph_optim(&self, var: &Self, optim: bool) -> Option<Self> {
+        let new_node = {
+            let mut nodes = self.tape.nodes.borrow_mut();
+            gen_graph(&mut nodes, self.idx, var.idx, &|_, _, _| (), optim)
         };
         new_node.map(|idx| TapeTerm {
             tape: self.tape,
@@ -279,10 +290,11 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         &self,
         var: &Self,
         cb: &impl Fn(&[TapeNode<T>], TapeIndex, TapeIndex),
+        optim: bool,
     ) -> Option<Self> {
         let new_node = {
             let mut nodes = self.tape.nodes.borrow_mut();
-            gen_graph(&mut nodes, self.idx, var.idx, cb)
+            gen_graph(&mut nodes, self.idx, var.idx, cb, optim)
         };
         new_node.map(|idx| TapeTerm {
             tape: self.tape,
@@ -467,6 +479,17 @@ fn add_node<T: Tensor>(
     new_idx as TapeIndex
 }
 
+fn find_node<T: Tensor>(
+    nodes: &[TapeNode<T>],
+    pred: impl Fn(&TapeValue<T>) -> bool,
+) -> Option<TapeIndex> {
+    nodes
+        .iter()
+        .enumerate()
+        .find(|(_, node)| pred(&node.value))
+        .map(|(i, _)| i as u32)
+}
+
 pub fn add_value<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, val: T) -> TapeIndex {
     let name = format!("{val}");
     add_node(nodes, name, TapeValue::Value(val))
@@ -476,7 +499,19 @@ pub fn add_add<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     lhs: TapeIndex,
     rhs: TapeIndex,
+    optim: bool,
 ) -> TapeIndex {
+    if optim {
+        if let Some(idx) = find_node(nodes, |existing| {
+            if let TapeValue::Add(elhs, erhs) = *existing {
+                elhs == lhs && erhs == rhs
+            } else {
+                false
+            }
+        }) {
+            return idx;
+        }
+    }
     let name = format!(
         "({} + {})",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -488,7 +523,19 @@ pub fn add_sub<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     lhs: TapeIndex,
     rhs: TapeIndex,
+    optim: bool,
 ) -> TapeIndex {
+    if optim {
+        if let Some(idx) = find_node(nodes, |existing| {
+            if let TapeValue::Sub(elhs, erhs) = *existing {
+                elhs == lhs && erhs == rhs
+            } else {
+                false
+            }
+        }) {
+            return idx;
+        }
+    }
     let name = format!(
         "({} - {})",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -500,7 +547,19 @@ pub fn add_mul<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     lhs: TapeIndex,
     rhs: TapeIndex,
+    optim: bool,
 ) -> TapeIndex {
+    if optim {
+        if let Some(idx) = find_node(nodes, |existing| {
+            if let TapeValue::Mul(elhs, erhs) = *existing {
+                elhs == lhs && erhs == rhs
+            } else {
+                false
+            }
+        }) {
+            return idx;
+        }
+    }
     let name = format!(
         "{} * {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -508,7 +567,23 @@ pub fn add_mul<T: Tensor>(
     add_node(nodes, name, TapeValue::Mul(lhs, rhs))
 }
 
-fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeIndex) -> TapeIndex {
+fn add_div<T: Tensor>(
+    nodes: &mut Vec<TapeNode<T>>,
+    lhs: TapeIndex,
+    rhs: TapeIndex,
+    optim: bool,
+) -> TapeIndex {
+    if optim {
+        if let Some(idx) = find_node(nodes, |existing| {
+            if let TapeValue::Div(elhs, erhs) = *existing {
+                elhs == lhs && erhs == rhs
+            } else {
+                false
+            }
+        }) {
+            return idx;
+        }
+    }
     let name = format!(
         "{} / {}",
         nodes[lhs as usize].name, nodes[rhs as usize].name
@@ -516,7 +591,18 @@ fn add_div<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, lhs: TapeIndex, rhs: TapeInd
     add_node(nodes, name, TapeValue::Div(lhs, rhs))
 }
 
-fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex) -> TapeIndex {
+fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex, optim: bool) -> TapeIndex {
+    if optim {
+        if let Some(idx) = find_node(nodes, |existing| {
+            if let TapeValue::Neg(e) = *existing {
+                e == node
+            } else {
+                false
+            }
+        }) {
+            return idx;
+        }
+    }
     let name = format!("-{}", nodes[node as usize].name);
     add_node(nodes, name, TapeValue::Neg(node))
 }
@@ -542,6 +628,7 @@ fn gen_graph<T: Tensor + 'static>(
     idx: TapeIndex,
     wrt: TapeIndex,
     cb: &impl Fn(&[TapeNode<T>], TapeIndex, TapeIndex),
+    optim: bool,
 ) -> Option<TapeIndex> {
     use TapeValue::*;
     let ret = match nodes[idx as usize].value {
@@ -553,70 +640,70 @@ fn gen_graph<T: Tensor + 'static>(
             }
         }
         Add(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt, cb);
-            let rhs = gen_graph(nodes, rhs, wrt, cb);
+            let lhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let rhs = gen_graph(nodes, rhs, wrt, cb, optim);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
                 (None, Some(rhs)) => Some(rhs),
-                (Some(lhs), Some(rhs)) => Some(add_add(nodes, lhs, rhs)),
+                (Some(lhs), Some(rhs)) => Some(add_add(nodes, lhs, rhs, optim)),
                 _ => None,
             }
         }
         Sub(lhs, rhs) => {
-            let lhs = gen_graph(nodes, lhs, wrt, cb);
-            let rhs = gen_graph(nodes, rhs, wrt, cb);
+            let lhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let rhs = gen_graph(nodes, rhs, wrt, cb, optim);
             match (lhs, rhs) {
                 (Some(lhs), None) => Some(lhs),
-                (None, Some(rhs)) => Some(add_neg(nodes, rhs)),
-                (Some(lhs), Some(rhs)) => Some(add_sub(nodes, lhs, rhs)),
+                (None, Some(rhs)) => Some(add_neg(nodes, rhs, optim)),
+                (Some(lhs), Some(rhs)) => Some(add_sub(nodes, lhs, rhs, optim)),
                 _ => None,
             }
         }
         Mul(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, lhs, wrt, cb);
-            let drhs = gen_graph(nodes, rhs, wrt, cb);
+            let dlhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let drhs = gen_graph(nodes, rhs, wrt, cb, optim);
             match (dlhs, drhs) {
-                (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs)),
-                (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs)),
+                (Some(dlhs), None) => Some(add_mul(nodes, dlhs, rhs, optim)),
+                (None, Some(drhs)) => Some(add_mul(nodes, lhs, drhs, optim)),
                 (Some(dlhs), Some(drhs)) => {
-                    let plhs = add_mul(nodes, dlhs, rhs);
-                    let prhs = add_mul(nodes, lhs, drhs);
-                    let node = add_add(nodes, plhs, prhs);
+                    let plhs = add_mul(nodes, dlhs, rhs, optim);
+                    let prhs = add_mul(nodes, lhs, drhs, optim);
+                    let node = add_add(nodes, plhs, prhs, optim);
                     Some(node)
                 }
                 _ => None,
             }
         }
         Div(lhs, rhs) => {
-            let dlhs = gen_graph(nodes, lhs, wrt, cb);
-            let drhs = gen_graph(nodes, rhs, wrt, cb);
+            let dlhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let drhs = gen_graph(nodes, rhs, wrt, cb, optim);
             match (dlhs, drhs) {
-                (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs)),
+                (Some(dlhs), None) => Some(add_div(nodes, dlhs, rhs, optim)),
                 (None, Some(drhs)) => {
-                    let node = add_mul(nodes, lhs, drhs);
-                    let node = add_div(nodes, node, rhs);
-                    let node = add_div(nodes, node, rhs);
-                    Some(add_neg(nodes, node))
+                    let node = add_mul(nodes, lhs, drhs, optim);
+                    let node = add_div(nodes, node, rhs, optim);
+                    let node = add_div(nodes, node, rhs, optim);
+                    Some(add_neg(nodes, node, optim))
                 }
                 (Some(dlhs), Some(drhs)) => {
-                    let plhs = add_div(nodes, dlhs, rhs);
-                    let node = add_mul(nodes, lhs, drhs);
-                    let prhs = add_div(nodes, node, rhs);
-                    let prhs = add_div(nodes, prhs, rhs);
-                    Some(add_sub(nodes, plhs, prhs))
+                    let plhs = add_div(nodes, dlhs, rhs, optim);
+                    let node = add_mul(nodes, lhs, drhs, optim);
+                    let prhs = add_div(nodes, node, rhs, optim);
+                    let prhs = add_div(nodes, prhs, rhs, optim);
+                    Some(add_sub(nodes, plhs, prhs, optim))
                 }
                 _ => None,
             }
         }
-        Neg(term) => gen_graph(nodes, term, wrt, cb).map(|node| add_neg(nodes, node)),
+        Neg(term) => gen_graph(nodes, term, wrt, cb, optim).map(|node| add_neg(nodes, node, optim)),
         UnaryFn(UnaryFnPayload { term, ref mut f }) => {
             let taken_f = f.take();
-            let derived = gen_graph(nodes, term, wrt, cb);
+            let derived = gen_graph(nodes, term, wrt, cb, optim);
             let ret = derived.and_then(|derived| {
                 taken_f
                     .as_ref()
                     .unwrap()
-                    .gen_graph(nodes, term, idx, derived)
+                    .gen_graph(nodes, term, idx, derived, optim)
             });
             if let UnaryFn(UnaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
                 *f = taken_f;

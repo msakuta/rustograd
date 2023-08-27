@@ -24,8 +24,9 @@ impl UnaryFn<f64> for ExpFn {
         _input: TapeIndex,
         output: TapeIndex,
         derived: TapeIndex,
+        optim: bool,
     ) -> Option<TapeIndex> {
-        Some(add_mul(nodes, output, derived))
+        Some(add_mul(nodes, output, derived, optim))
     }
 }
 
