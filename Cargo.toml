@@ -9,6 +9,7 @@ edition = "2021"
 rustograd-macro = { path = "rustograd-macro", optional = true }
 
 [dev-dependencies]
+gif = "0.12.0"
 rustograd-macro = { path = "rustograd-macro" }
 
 [features]

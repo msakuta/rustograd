@@ -1,7 +1,10 @@
 //! Implementation of shared memory arena for the terms, aka a tape.
 //! See https://rufflewind.com/2016-12-30/reverse-mode-automatic-differentiation
 
-use std::{cell::RefCell, io::Write};
+use std::{
+    cell::{Ref, RefCell},
+    io::Write,
+};
 
 use crate::{
     error::ValueNotDefinedError,
@@ -29,6 +32,17 @@ pub struct TapeNode<T> {
     value: TapeValue<T>,
     data: Option<T>,
     grad: Option<T>,
+}
+
+impl<T> TapeNode<T> {
+    pub fn parents(&self) -> [Option<TapeIndex>; 2] {
+        use TapeValue::*;
+        match self.value {
+            Value(_) => [None; 2],
+            Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
+            Add(lhs, rhs) | Sub(lhs, rhs) | Mul(lhs, rhs) | Div(lhs, rhs) => [Some(lhs), Some(rhs)],
+        }
+    }
 }
 
 struct UnaryFnPayload<T> {
@@ -163,6 +177,10 @@ impl<T: Tensor> Tape<T> {
             tape: self,
             idx: idx as TapeIndex,
         }
+    }
+
+    pub fn nodes(&self) -> Ref<Vec<TapeNode<T>>> {
+        self.nodes.borrow()
     }
 }
 
