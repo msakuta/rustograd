@@ -18,5 +18,6 @@ macro = ["dep:rustograd-macro"]
 
 [workspace]
 members = [
-    "rustograd-macro"
+    "rustograd-macro",
+    "rustograph"
 ]
