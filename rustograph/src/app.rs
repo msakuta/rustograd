@@ -4,7 +4,6 @@ use eframe::{
     egui::{self, Color32, Frame, Pos2, Rect, Ui},
     emath::Align2,
     epaint::{pos2, FontId},
-    glow::ATOMIC_COUNTER_BUFFER_REFERENCED_BY_FRAGMENT_SHADER,
 };
 use rustograd::{tape::TapeNode, Tape, TapeTerm};
 
@@ -20,7 +19,7 @@ pub struct RustographApp<'a> {
     tape: &'static Tape<f64>,
     a: TapeTerm<'a, f64>,
     exp_a: TapeTerm<'a, f64>,
-    count: usize,
+    tick_count: usize,
 }
 
 impl<'a> RustographApp<'a> {
@@ -32,7 +31,7 @@ impl<'a> RustographApp<'a> {
             tape,
             a,
             exp_a,
-            count: 0,
+            tick_count: 0,
         }
     }
 
@@ -65,9 +64,30 @@ impl<'a> RustographApp<'a> {
                 };
                 // let center = pos2(x, NODE_OFFSET + 1 as f32 * NODE_INTERVAL);
                 painter.rect_stroke(to_screen.transform_rect(rect), 10., (1., Color32::BLACK));
+
+                let mid = (bbox[0] + bbox[2]) / 2.;
+                for parent in nodes[i].parents().into_iter().filter_map(|p| p) {
+                    if let Some(parent) = gen_pos.get(&(parent as usize)) {
+                        let pbbox = bbox_pos(parent.1, parent.0);
+                        let pmid = (pbbox[0] + pbbox[2]) / 2.;
+                        painter.line_segment(
+                            [
+                                to_screen.transform_pos(pos2(mid, bbox[1])),
+                                to_screen.transform_pos(pos2(pmid, pbbox[3])),
+                            ],
+                            (2., Color32::BLACK),
+                        );
+                        painter.circle_stroke(
+                            to_screen.transform_pos(pos2((pbbox[0] + pbbox[2]) / 2., pbbox[3])),
+                            4.,
+                            (1., Color32::BLACK),
+                        );
+                    }
+                }
+
                 painter.text(
-                    pos2(rect.min.x, rect.min.y + rect.height()),
-                    Align2::LEFT_CENTER,
+                    to_screen.transform_pos(rect.center()),
+                    Align2::CENTER_CENTER,
                     node.name(),
                     FontId::monospace(12.),
                     Color32::BLACK,
@@ -83,12 +103,12 @@ impl<'a> eframe::App for RustographApp<'a> {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
 
-        if self.count < GEN_INTERVAL * 3 {
-            if self.count % GEN_INTERVAL == 0 {
+        if self.tick_count < GEN_INTERVAL * 3 {
+            if self.tick_count % GEN_INTERVAL == 0 {
                 self.exp_a.gen_graph(&self.a);
             }
         }
-        self.count += 1;
+        self.tick_count += 1;
 
         // eframe::egui::SidePanel::right("side_panel")
         //     .min_width(200.)

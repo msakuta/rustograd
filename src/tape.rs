@@ -35,6 +35,10 @@ pub struct TapeNode<T> {
 }
 
 impl<T> TapeNode<T> {
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+
     pub fn parents(&self) -> [Option<TapeIndex>; 2] {
         use TapeValue::*;
         match self.value {

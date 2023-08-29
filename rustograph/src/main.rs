@@ -1,8 +1,6 @@
 mod app;
 mod exp;
 
-use rustograd::Tape;
-
 use crate::app::RustographApp;
 
 fn main() {
