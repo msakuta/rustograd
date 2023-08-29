@@ -83,6 +83,47 @@ impl<'a> RustographApp<'a> {
         });
     }
 
+    fn init_nodes(&mut self) {
+        let out_nodes = RefCell::new(vec![]);
+
+        let gen_count = RefCell::new(vec![]);
+        let gen_pos = RefCell::new(HashMap::new());
+        let callback = |nodes: &[TapeNode<f64>], _idx| {
+            for (i, node) in nodes.iter().enumerate() {
+                let gen = ancestory_generations(&nodes, i);
+                let mut gen_count = gen_count.borrow_mut();
+                if gen_count.len() <= gen {
+                    gen_count.resize(gen + 1, 0);
+                }
+                gen_count[gen] += 1;
+                let sibling = gen_count[gen];
+                gen_pos.borrow_mut().insert(i, (gen, sibling));
+                let pos = node_pos(sibling, gen);
+
+                let parents = node
+                    .parents()
+                    .into_iter()
+                    .filter_map(|p| p.map(|p| p as usize))
+                    .collect();
+
+                let name = node.name();
+                out_nodes.borrow_mut().push(Node {
+                    name: name.to_string(),
+                    pos,
+                    width: name.len() as f32 * 10.,
+                    parents,
+                    gen,
+                });
+            }
+        };
+
+        if let Some(term) = self.next_term {
+            term.eval_cb(&callback);
+        }
+
+        self.nodes = out_nodes.into_inner();
+    }
+
     fn gen_nodes(&mut self) {
         let out_nodes = RefCell::new(vec![]);
 
@@ -112,6 +153,7 @@ impl<'a> RustographApp<'a> {
                     pos,
                     width: name.len() as f32 * 10.,
                     parents,
+                    gen,
                 });
             }
         };
@@ -122,6 +164,46 @@ impl<'a> RustographApp<'a> {
 
         self.nodes = out_nodes.into_inner();
     }
+
+    /// Apply forces between nodes
+    fn apply_force(&mut self) {
+        let mut rows: Vec<Vec<(usize, Pos2, f32)>> = vec![];
+        for (i, node) in self.nodes.iter().enumerate() {
+            if rows.len() <= node.gen {
+                rows.resize_with(node.gen + 1, Default::default);
+            }
+            rows[node.gen].push((i, node.pos + vec2(node.width / 2., 0.), node.width / 2.));
+        }
+
+        const MIN_DIST: f32 = 20.;
+
+        for (i, node) in self.nodes.iter_mut().enumerate() {
+            let x = node.pos.x + node.width / 2.;
+            let nearest = rows.get(node.gen).and_then(|row| {
+                row.iter().fold(None, |acc: Option<(f32, f32)>, cur| {
+                    if i == cur.0 {
+                        return acc;
+                    }
+                    let dist = ((x - cur.1.x).abs() - (node.width / 2.+cur.2)).max(0.);
+                    if MIN_DIST < dist {
+                        return acc;
+                    }
+                    if let Some(acc) = acc {
+                        if acc.1 < dist {
+                            Some(acc)
+                        } else {
+                            Some((cur.1.x, dist))
+                        }
+                    } else {
+                        Some((cur.1.x, dist))
+                    }
+                })
+            });
+            if let Some((other_x, dist)) = nearest {
+                node.pos.x += 5. * if x < other_x { -1. } else { 1. } / (1. + dist)
+            }
+        }
+    }
 }
 
 const GEN_INTERVAL: usize = 100;
@@ -130,11 +212,19 @@ impl<'a> eframe::App for RustographApp<'a> {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {
         ctx.request_repaint();
 
-        if self.tick_count < GEN_INTERVAL * 3 {
+        if self.tick_count == 0 {
+            self.init_nodes();
+            self.tick_count += 1;
+        }
+
+        if self.tick_count <= GEN_INTERVAL * 2 {
             if self.tick_count % GEN_INTERVAL == 0 {
                 self.gen_nodes();
             }
         }
+
+        self.apply_force();
+
         self.tick_count += 1;
 
         // eframe::egui::SidePanel::right("side_panel")
@@ -172,6 +262,7 @@ struct Node {
     pos: Pos2,
     width: f32,
     parents: Vec<usize>,
+    gen: usize,
 }
 
 impl Node {
