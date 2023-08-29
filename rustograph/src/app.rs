@@ -1,9 +1,9 @@
-use std::collections::HashMap;
+use std::{cell::RefCell, collections::HashMap};
 
 use eframe::{
     egui::{self, Color32, Frame, Pos2, Rect, Ui},
     emath::Align2,
-    epaint::{pos2, FontId},
+    epaint::{pos2, vec2, FontId},
 };
 use rustograd::{tape::TapeNode, Tape, TapeTerm};
 
@@ -18,8 +18,9 @@ const NODE_Y_INTERVAL: f32 = 50.;
 pub struct RustographApp<'a> {
     tape: &'static Tape<f64>,
     a: TapeTerm<'a, f64>,
-    exp_a: TapeTerm<'a, f64>,
+    next_term: Option<TapeTerm<'a, f64>>,
     tick_count: usize,
+    nodes: Vec<Node>,
 }
 
 impl<'a> RustographApp<'a> {
@@ -30,8 +31,9 @@ impl<'a> RustographApp<'a> {
         Self {
             tape,
             a,
-            exp_a,
+            next_term: Some(exp_a),
             tick_count: 0,
+            nodes: vec![],
         }
     }
 
@@ -45,40 +47,25 @@ impl<'a> RustographApp<'a> {
                 response.rect,
             );
 
-            let nodes = self.tape.nodes();
-            let mut gen_count = vec![];
-            let mut gen_pos = HashMap::new();
-
-            for (i, node) in nodes.iter().enumerate() {
-                let gen = ancestory_generations(&nodes, i);
-                if gen_count.len() <= gen {
-                    gen_count.resize(gen + 1, 0);
-                }
-                gen_count[gen] += 1;
-                let sibling = gen_count[gen];
-                gen_pos.insert(i, (gen, sibling));
-                let bbox = bbox_pos(sibling, gen);
-                let rect = Rect {
-                    min: pos2(bbox[0], bbox[1]),
-                    max: pos2(bbox[2], bbox[3]),
-                };
+            for node in self.nodes.iter() {
+                let rect = node.rect();
                 // let center = pos2(x, NODE_OFFSET + 1 as f32 * NODE_INTERVAL);
                 painter.rect_stroke(to_screen.transform_rect(rect), 10., (1., Color32::BLACK));
 
-                let mid = (bbox[0] + bbox[2]) / 2.;
-                for parent in nodes[i].parents().into_iter().filter_map(|p| p) {
-                    if let Some(parent) = gen_pos.get(&(parent as usize)) {
-                        let pbbox = bbox_pos(parent.1, parent.0);
-                        let pmid = (pbbox[0] + pbbox[2]) / 2.;
+                let mid = rect.min.x + rect.width() / 2.;
+                for parent in &node.parents {
+                    if let Some(parent) = self.nodes.get(*parent) {
+                        let prect = parent.rect();
+                        let pmid = prect.min.x + prect.width() / 2.;
                         painter.line_segment(
                             [
-                                to_screen.transform_pos(pos2(mid, bbox[1])),
-                                to_screen.transform_pos(pos2(pmid, pbbox[3])),
+                                to_screen.transform_pos(pos2(mid, rect.min.y)),
+                                to_screen.transform_pos(pos2(pmid, prect.max.y)),
                             ],
                             (2., Color32::BLACK),
                         );
                         painter.circle_stroke(
-                            to_screen.transform_pos(pos2((pbbox[0] + pbbox[2]) / 2., pbbox[3])),
+                            to_screen.transform_pos(pos2(pmid, prect.max.y)),
                             4.,
                             (1., Color32::BLACK),
                         );
@@ -88,12 +75,52 @@ impl<'a> RustographApp<'a> {
                 painter.text(
                     to_screen.transform_pos(rect.center()),
                     Align2::CENTER_CENTER,
-                    node.name(),
+                    &node.name,
                     FontId::monospace(12.),
                     Color32::BLACK,
                 );
             }
         });
+    }
+
+    fn gen_nodes(&mut self) {
+        let out_nodes = RefCell::new(vec![]);
+
+        let gen_count = RefCell::new(vec![]);
+        let gen_pos = RefCell::new(HashMap::new());
+        let callback = |nodes: &[TapeNode<f64>], _idx, _| {
+            for (i, node) in nodes.iter().enumerate() {
+                let gen = ancestory_generations(&nodes, i);
+                let mut gen_count = gen_count.borrow_mut();
+                if gen_count.len() <= gen {
+                    gen_count.resize(gen + 1, 0);
+                }
+                gen_count[gen] += 1;
+                let sibling = gen_count[gen];
+                gen_pos.borrow_mut().insert(i, (gen, sibling));
+                let pos = node_pos(sibling, gen);
+
+                let parents = node
+                    .parents()
+                    .into_iter()
+                    .filter_map(|p| p.map(|p| p as usize))
+                    .collect();
+
+                let name = node.name();
+                out_nodes.borrow_mut().push(Node {
+                    name: name.to_string(),
+                    pos,
+                    width: name.len() as f32 * 10.,
+                    parents,
+                });
+            }
+        };
+
+        if let Some(term) = self.next_term {
+            self.next_term = term.gen_graph_cb(&self.a, &callback, false);
+        }
+
+        self.nodes = out_nodes.into_inner();
     }
 }
 
@@ -105,7 +132,7 @@ impl<'a> eframe::App for RustographApp<'a> {
 
         if self.tick_count < GEN_INTERVAL * 3 {
             if self.tick_count % GEN_INTERVAL == 0 {
-                self.exp_a.gen_graph(&self.a);
+                self.gen_nodes();
             }
         }
         self.tick_count += 1;
@@ -123,13 +150,11 @@ impl<'a> eframe::App for RustographApp<'a> {
     }
 }
 
-fn bbox_pos(x: usize, y: usize) -> [f32; 4] {
-    [
+fn node_pos(x: usize, y: usize) -> Pos2 {
+    pos2(
         NODE_OFFSET + x as f32 * NODE_X_INTERVAL,
         NODE_OFFSET + y as f32 * NODE_Y_INTERVAL,
-        NODE_OFFSET + x as f32 * NODE_X_INTERVAL + NODE_WIDTH,
-        NODE_OFFSET + y as f32 * NODE_Y_INTERVAL + NODE_HEIGHT,
-    ]
+    )
 }
 
 fn ancestory_generations(nodes: &[TapeNode<f64>], idx: usize) -> usize {
@@ -140,4 +165,20 @@ fn ancestory_generations(nodes: &[TapeNode<f64>], idx: usize) -> usize {
         .map(|p| ancestory_generations(nodes, p as usize) + 1)
         .max()
         .unwrap_or(0)
+}
+
+struct Node {
+    name: String,
+    pos: Pos2,
+    width: f32,
+    parents: Vec<usize>,
+}
+
+impl Node {
+    fn rect(&self) -> Rect {
+        Rect {
+            min: self.pos,
+            max: self.pos + vec2(self.width, NODE_HEIGHT),
+        }
+    }
 }
