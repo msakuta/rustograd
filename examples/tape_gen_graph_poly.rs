@@ -55,7 +55,9 @@ fn main() {
     let mut next = sin_a;
     write!(csv, "x, $x^3$, ").unwrap();
     for i in 1..4 {
-        let Some(next_i) = next.gen_graph(&a) else { break };
+        let Some(next_i) = next.gen_graph(&a) else {
+            break;
+        };
         next = next_i;
         derivatives.push(next);
         write!(csv, "$(d^{i} x^3)/(d x^{i})$, ").unwrap();
