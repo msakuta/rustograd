@@ -66,7 +66,8 @@ fn main() {
     let last_pos = model.xs.last().unwrap();
 
     // if let Ok(f) = std::fs::File::create("graph.dot") {
-    //     pos.x.dot_builder()
+    //     let x2 = model.xs.first().unwrap();
+    //     x2.x.dot_builder()
     //         .vertical(true)
     //         .output_term(x2.x, "x2.x")
     //         .output_term(x2.y, "x2.y")
@@ -96,14 +97,14 @@ fn main() {
     );
     println!("derive(vx, vy): {:?}, {:?}", xd, yd);
 
-    const RATE: f64 = 2e-3;
+    const RATE: f64 = 5e-4;
 
     let mut loss_f = std::fs::File::create("orbit_loss.csv")
         .map(std::io::BufWriter::new)
         .unwrap();
 
     // optimization loop
-    for i in 0..30 {
+    for i in 0..100 {
         model.loss.eval();
         model.loss.backprop().unwrap();
         let xd = v0.x.grad().unwrap();
@@ -156,7 +157,7 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
     };
     let mut vx = Vec2 {
         x: tape.term("vx", 0.),
-        y: tape.term("vy", 0.1),
+        y: tape.term("vy", 0.2),
     };
     let earth = Vec2 {
         x: tape.term("bx", 0.),
@@ -169,7 +170,7 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
     let mut accels = vec![];
     let mut vs = vec![vx];
     let mut xs = vec![pos];
-    for _ in 0..8 {
+    for _ in 0..40 {
         let diff = earth - pos;
         let len = diff.x * diff.x + diff.y * diff.y;
         let accel = diff / len * gm;
@@ -180,12 +181,13 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
         vs.push(vx);
     }
 
-    let target_x = tape.term("target_x", 0.);
-    let target_y = tape.term("target_y", 1.);
-    let last_pos = xs.last().unwrap();
-    let diffx = last_pos.x - target_x;
-    let diffy = last_pos.y - target_y;
-    let loss = diffx * diffx + diffy * diffy;
+    let target = Vec2 {
+        x: tape.term("target_x", -1.),
+        y: tape.term("target_y", 0.),
+    };
+    let last_pos = xs[20];
+    let diff = last_pos - target;
+    let loss = diff.x * diff.x + diff.y * diff.y;
 
     Model {
         accels,

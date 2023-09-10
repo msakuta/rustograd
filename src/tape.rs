@@ -173,12 +173,18 @@ impl<T: Tensor> Tape<T> {
 impl<'a, T: Tensor> std::ops::Add for TapeTerm<'a, T> {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
+        #[cfg(feature = "expr_name")]
         let name = {
             let nodes = self.tape.nodes.borrow();
             format!(
                 "({} + {})",
                 nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
             )
+        };
+        #[cfg(not(feature = "expr_name"))]
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            nodes[self.idx as usize].name.clone()
         };
         self.tape.term_name(name, TapeValue::Add(self.idx, rhs.idx))
     }
@@ -187,12 +193,18 @@ impl<'a, T: Tensor> std::ops::Add for TapeTerm<'a, T> {
 impl<'a, T: Tensor> std::ops::Sub for TapeTerm<'a, T> {
     type Output = Self;
     fn sub(self, rhs: Self) -> Self::Output {
+        #[cfg(feature = "expr_name")]
         let name = {
             let nodes = self.tape.nodes.borrow();
             format!(
                 "({} - {})",
                 nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
             )
+        };
+        #[cfg(not(feature = "expr_name"))]
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            nodes[self.idx as usize].name.clone()
         };
         self.tape.term_name(name, TapeValue::Sub(self.idx, rhs.idx))
     }
@@ -201,12 +213,18 @@ impl<'a, T: Tensor> std::ops::Sub for TapeTerm<'a, T> {
 impl<'a, T: Tensor> std::ops::Mul for TapeTerm<'a, T> {
     type Output = Self;
     fn mul(self, rhs: Self) -> Self::Output {
+        #[cfg(feature = "expr_name")]
         let name = {
             let nodes = self.tape.nodes.borrow();
             format!(
                 "{} * {}",
                 nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
             )
+        };
+        #[cfg(not(feature = "expr_name"))]
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            nodes[self.idx as usize].name.clone()
         };
         self.tape.term_name(name, TapeValue::Mul(self.idx, rhs.idx))
     }
@@ -215,12 +233,18 @@ impl<'a, T: Tensor> std::ops::Mul for TapeTerm<'a, T> {
 impl<'a, T: Tensor> std::ops::Div for TapeTerm<'a, T> {
     type Output = Self;
     fn div(self, rhs: Self) -> Self::Output {
+        #[cfg(feature = "expr_name")]
         let name = {
             let nodes = self.tape.nodes.borrow();
             format!(
                 "{} / {}",
                 nodes[self.idx as usize].name, nodes[rhs.idx as usize].name
             )
+        };
+        #[cfg(not(feature = "expr_name"))]
+        let name = {
+            let nodes = self.tape.nodes.borrow();
+            nodes[self.idx as usize].name.clone()
         };
         self.tape.term_name(name, TapeValue::Div(self.idx, rhs.idx))
     }
