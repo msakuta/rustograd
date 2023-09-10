@@ -97,14 +97,14 @@ fn main() {
     );
     println!("derive(vx, vy): {:?}, {:?}", xd, yd);
 
-    const RATE: f64 = 5e-4;
+    const RATE: f64 = 5e-5;
 
     let mut loss_f = std::fs::File::create("orbit_loss.csv")
         .map(std::io::BufWriter::new)
         .unwrap();
 
     // optimization loop
-    for i in 0..100 {
+    for i in 0..30 {
         model.loss.eval();
         model.loss.backprop().unwrap();
         let xd = v0.x.grad().unwrap();
@@ -157,7 +157,7 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
     };
     let mut vx = Vec2 {
         x: tape.term("vx", 0.),
-        y: tape.term("vy", 0.2),
+        y: tape.term("vy", 0.15),
     };
     let earth = Vec2 {
         x: tape.term("bx", 0.),
@@ -170,14 +170,15 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
     let mut accels = vec![];
     let mut vs = vec![vx];
     let mut xs = vec![pos];
-    for _ in 0..40 {
-        let diff = earth - pos;
-        let len = diff.x * diff.x + diff.y * diff.y;
-        let accel = diff / len * gm;
-        accels.push(accel);
-        pos = pos + vx + accel * half;
+    for _ in 0..30 {
+        let accel = gravity(earth, pos, gm);
+        let delta_x = vx + accel * half;
+        let accel2 = gravity(earth, pos + delta_x * half, gm);
+        let delta_x2 = vx + accel * half;
+        pos = pos + delta_x2;
+        accels.push(accel2);
         xs.push(pos);
-        vx = vx + accel;
+        vx = vx + accel2;
         vs.push(vx);
     }
 
@@ -185,7 +186,7 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
         x: tape.term("target_x", -1.),
         y: tape.term("target_y", 0.),
     };
-    let last_pos = xs[20];
+    let last_pos = xs[18];
     let diff = last_pos - target;
     let loss = diff.x * diff.x + diff.y * diff.y;
 
@@ -195,4 +196,15 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
         vs,
         loss,
     }
+}
+
+fn gravity<'a>(earth: Vec2<'a>, pos: Vec2<'a>, gm: TapeTerm<'a>) -> Vec2<'a> {
+    let diff = earth - pos;
+    let len2 = diff.x * diff.x + diff.y * diff.y;
+    let len32 = len2.apply(
+        "pow[3/2]",
+        |x| x.powf(3. / 2.),
+        |x| 3. / 2. * x.powf(1. / 2.),
+    );
+    diff / len32 * gm
 }
