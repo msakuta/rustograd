@@ -164,6 +164,10 @@ impl<T: Tensor> Tape<T> {
             idx: idx as TapeIndex,
         }
     }
+
+    pub fn len(&self) -> usize {
+        self.nodes.borrow().len()
+    }
 }
 
 impl<'a, T: Tensor> std::ops::Add for TapeTerm<'a, T> {
@@ -825,6 +829,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
     /// Add an output node to indicate in the graph. Useful to distinguish the output in a complex graph.
     pub fn output_node(mut self, term: TapeIndex, name: impl Into<String>) -> Self {
         self.output_node.push((term, name.into()));
+        self
+    }
+
+    /// Add an output node to indicate in the graph. Useful to distinguish the output in a complex graph.
+    pub fn output_term(mut self, term: TapeTerm<'a>, name: impl Into<String>) -> Self {
+        self.output_node.push((term.idx, name.into()));
         self
     }
 
