@@ -7,6 +7,7 @@ use crate::{
     error::ValueNotDefinedError,
     tensor::Tensor,
     unary_fn::{PtrUnaryFn, UnaryFn},
+    BinaryFn,
 };
 
 #[derive(Default, Debug)]
@@ -45,6 +46,22 @@ impl<T> std::fmt::Debug for UnaryFnPayload<T> {
     }
 }
 
+struct BinaryFnPayload<T> {
+    lhs: u32,
+    rhs: u32,
+    f: Option<Box<dyn BinaryFn<T>>>,
+}
+
+impl<T> std::fmt::Debug for BinaryFnPayload<T> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TermPayload")
+            .field("lhs", &self.lhs)
+            .field("rhs", &self.rhs)
+            .field("f", &"<dyn TapeFn>")
+            .finish()
+    }
+}
+
 #[derive(Debug)]
 enum TapeValue<T> {
     Value(T),
@@ -54,6 +71,7 @@ enum TapeValue<T> {
     Div(TapeIndex, TapeIndex),
     Neg(TapeIndex),
     UnaryFn(UnaryFnPayload<T>),
+    BinaryFn(BinaryFnPayload<T>),
 }
 
 /// An implementation of forward/reverse mode automatic differentiation, using memory arena called a [`Tape`],
@@ -65,7 +83,7 @@ enum TapeValue<T> {
 /// # Example
 ///
 /// ```
-/// let tape = Tape::new();
+/// let tape = rustograd::Tape::new();
 /// let a = tape.term("a", 123.);
 /// let b = tape.term("b", 321.);
 /// let c = tape.term("c", 42.);
@@ -167,6 +185,16 @@ impl<T: Tensor> Tape<T> {
 
     pub fn len(&self) -> usize {
         self.nodes.borrow().len()
+    }
+}
+
+impl<T: Tensor + std::fmt::Debug> Tape<T> {
+    pub fn dump_nodes(&self) {
+        let nodes = self.nodes.borrow();
+        let n = nodes.len();
+        for (i, node) in nodes.iter().enumerate() {
+            println!("[{i}/{n}]: {node:?}");
+        }
     }
 }
 
@@ -364,6 +392,22 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         )
     }
 
+    pub fn apply_bin(&self, rhs: TapeTerm, f: Box<dyn BinaryFn<T>>) -> Self {
+        let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        #[cfg(feature = "expr_name")]
+        let name = format!("{}({})", f.name(), self_name);
+        #[cfg(not(feature = "expr_name"))]
+        let name = self_name;
+        self.tape.term_name(
+            name,
+            TapeValue::BinaryFn(BinaryFnPayload {
+                lhs: self.idx,
+                rhs: rhs.idx,
+                f: Some(f),
+            }),
+        )
+    }
+
     pub fn set(&self, value: T) -> Result<(), ()> {
         let mut nodes = self.tape.nodes.borrow_mut();
         let node = nodes.get_mut(self.idx as usize).ok_or_else(|| ())?;
@@ -446,6 +490,15 @@ fn eval<T: Tensor + 'static>(
             };
             f.as_ref().unwrap().f(val)
         }
+        BinaryFn(BinaryFnPayload { lhs, rhs, .. }) => {
+            let vlhs = eval(nodes, lhs, callback);
+            let vrhs = eval(nodes, rhs, callback);
+            // Ugly re-matching to avoid borrow checker
+            let BinaryFn(BinaryFnPayload { f, .. }) = &nodes[idx as usize].value else {
+                unreachable!()
+            };
+            f.as_ref().unwrap().f(vlhs, vrhs)
+        }
     };
     nodes[idx as usize].data = Some(data.clone());
     if let Some(callback) = callback {
@@ -487,6 +540,20 @@ fn derive<T: Tensor>(nodes: &mut [TapeNode<T>], idx: TapeIndex, wrt: TapeIndex) 
         Neg(term) => -derive(nodes, term, wrt)?,
         UnaryFn(UnaryFnPayload { term, ref f }) => {
             f.as_ref().unwrap().grad(value(nodes, term)?) * derive(nodes, term, wrt)?
+        }
+        BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
+            let local_grad = f
+                .as_ref()
+                .unwrap()
+                .grad(value(nodes, lhs)?, value(nodes, rhs)?);
+            let dlhs = derive(nodes, lhs, wrt);
+            let drhs = derive(nodes, rhs, wrt);
+            match (dlhs, drhs) {
+                (Some(dlhs), Some(drhs)) => local_grad.1 * drhs + local_grad.0 * dlhs,
+                (None, Some(drhs)) => local_grad.1 * drhs,
+                (Some(dlhs), None) => local_grad.0 * dlhs,
+                _ => return None,
+            }
         }
     };
     Some(grad)
@@ -595,7 +662,7 @@ pub fn add_mul<T: Tensor>(
     add_node(nodes, name, TapeValue::Mul(lhs, rhs))
 }
 
-fn add_div<T: Tensor>(
+pub fn add_div<T: Tensor>(
     nodes: &mut Vec<TapeNode<T>>,
     lhs: TapeIndex,
     rhs: TapeIndex,
@@ -619,7 +686,7 @@ fn add_div<T: Tensor>(
     add_node(nodes, name, TapeValue::Div(lhs, rhs))
 }
 
-fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex, optim: bool) -> TapeIndex {
+pub fn add_neg<T: Tensor>(nodes: &mut Vec<TapeNode<T>>, node: TapeIndex, optim: bool) -> TapeIndex {
     if optim {
         if let Some(idx) = find_node(nodes, |existing| {
             if let TapeValue::Neg(e) = *existing {
@@ -740,6 +807,36 @@ fn gen_graph<T: Tensor + 'static>(
             }
             ret
         }
+        BinaryFn(BinaryFnPayload {
+            lhs,
+            rhs,
+            ref mut f,
+        }) => {
+            let taken_f = f.take();
+            let dlhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let drhs = gen_graph(nodes, lhs, wrt, cb, optim);
+            let ret = match (dlhs, drhs) {
+                (Some(dlhs), None) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, lhs, 1, idx, dlhs, 0),
+                (None, Some(drhs)) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, 1, rhs, idx, 0, drhs),
+                (Some(dlhs), Some(drhs)) => taken_f
+                    .as_ref()
+                    .unwrap()
+                    .gen_graph(nodes, lhs, rhs, idx, dlhs, drhs),
+                _ => None,
+            };
+            if let BinaryFn(BinaryFnPayload { ref mut f, .. }) = nodes[idx as usize].value {
+                *f = taken_f;
+            } else {
+                unreachable!()
+            }
+            ret
+        }
     };
     if let Some(generated) = ret {
         cb(nodes, idx, generated);
@@ -809,6 +906,17 @@ fn backprop_rec<T: Tensor>(
                 let newgrad = grad * f.grad(val);
                 let endgrad = f.t(newgrad);
                 backprop_set(nodes, term, endgrad, callback)
+            }
+            BinaryFn(BinaryFnPayload { lhs, rhs, ref f }) => {
+                let vlhs = value(nodes, lhs).ok_or(ValueNotDefinedError)?;
+                let vrhs = value(nodes, rhs).ok_or(ValueNotDefinedError)?;
+                let f = f.as_ref().unwrap();
+                let local_grad = f.grad(vlhs, vrhs);
+                let (grad_l, grad_r) = f.t(grad);
+                let newgrad_l = local_grad.0 * grad_l;
+                let newgrad_r = local_grad.1 * grad_r;
+                backprop_set(nodes, lhs, newgrad_l, callback);
+                backprop_set(nodes, rhs, newgrad_r, callback);
             }
         }
     }
@@ -924,12 +1032,12 @@ impl<'a, T: Tensor> TapeDotBuilder<'a, T> {
         for (id, term) in nodes.iter().enumerate() {
             let parents = match term.value {
                 Value(_) => [None, None],
-                Add(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Sub(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Mul(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Div(lhs, rhs) => [Some(lhs), Some(rhs)],
-                Neg(term) => [Some(term), None],
-                UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
+                Add(lhs, rhs)
+                | Sub(lhs, rhs)
+                | Mul(lhs, rhs)
+                | Div(lhs, rhs)
+                | BinaryFn(BinaryFnPayload { lhs, rhs, .. }) => [Some(lhs), Some(rhs)],
+                Neg(term) | UnaryFn(UnaryFnPayload { term, .. }) => [Some(term), None],
             };
             for pid in parents.into_iter().filter_map(|v| v) {
                 writeln!(writer, "a{} -> a{};", pid, id)?;

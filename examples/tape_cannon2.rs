@@ -1,6 +1,5 @@
-use std::io::Write;
-
 use rustograd::{Tape, TapeTerm};
+use std::io::Write;
 
 #[derive(Clone, Copy)]
 struct Vec2<'a> {
@@ -58,6 +57,30 @@ impl<'a> std::ops::Neg for Vec2<'a> {
     }
 }
 
+struct MinOp;
+
+impl rustograd::BinaryFn<f64> for MinOp {
+    fn name(&self) -> String {
+        "min".to_string()
+    }
+
+    fn f(&self, lhs: f64, rhs: f64) -> f64 {
+        lhs.min(rhs)
+    }
+
+    fn t(&self, data: f64) -> (f64, f64) {
+        (data, data)
+    }
+
+    fn grad(&self, lhs: f64, rhs: f64) -> (f64, f64) {
+        if lhs < rhs {
+            (1., 0.)
+        } else {
+            (0., 1.)
+        }
+    }
+}
+
 fn main() {
     let tape = Tape::new();
     let model = get_model(&tape);
@@ -93,6 +116,8 @@ fn main() {
 
     model.loss.eval();
     model.loss.backprop().unwrap();
+    // tape.dump_nodes();
+
     let xd1 = v1.x.grad().unwrap();
     let yd1 = v1.y.grad().unwrap();
     let xd2 = v2.x.grad().unwrap();
@@ -105,7 +130,7 @@ fn main() {
     );
     println!("derive(vx, vy): {:?}, {:?}, {:?}, {:?}", xd1, yd1, xd2, yd2);
 
-    const RATE: f64 = 1e-4;
+    const RATE: f64 = 3e-4;
 
     let mut loss_f = std::fs::File::create("cannon_loss.csv")
         .map(std::io::BufWriter::new)
@@ -220,20 +245,19 @@ fn get_model<'a>(tape: &'a Tape<f64>) -> Model<'a> {
         simulate_bullet(&mut bullet2, &mut hist2);
     }
 
-    // let min = hist1.iter().zip(hist2.iter()).fold(None, |acc, cur| {
-    //     let diff = cur.1.pos - cur.0.pos;
-    //     let loss = diff.x * diff.x + diff.y * diff.y;
-    //     if let Some(acc) = acc {
-    //         Some(acc.apply("min", |x| x))
-    //     } else {
-    //         Some(loss)
-    //     }
-    // })
-
-    let last_pos1 = hist1.last().unwrap().pos;
-    let last_pos2 = hist2.last().unwrap().pos;
-    let diff = last_pos1 - last_pos2;
-    let loss = diff.x * diff.x + diff.y * diff.y;
+    let loss = hist1
+        .iter()
+        .zip(hist2.iter())
+        .fold(None, |acc: Option<TapeTerm<'a>>, cur| {
+            let diff = cur.1.pos - cur.0.pos;
+            let loss = diff.x * diff.x + diff.y * diff.y;
+            if let Some(acc) = acc {
+                Some(acc.apply_bin(loss, Box::new(MinOp)))
+            } else {
+                Some(loss)
+            }
+        })
+        .unwrap();
 
     Model { hist1, hist2, loss }
 }
