@@ -188,6 +188,16 @@ impl<T: Tensor> Tape<T> {
     }
 }
 
+impl<T: Tensor + std::fmt::Debug> Tape<T> {
+    pub fn dump_nodes(&self) {
+        let nodes = self.nodes.borrow();
+        let n = nodes.len();
+        for (i, node) in nodes.iter().enumerate() {
+            println!("[{i}/{n}]: {node:?}");
+        }
+    }
+}
+
 impl<'a, T: Tensor> std::ops::Add for TapeTerm<'a, T> {
     type Output = Self;
     fn add(self, rhs: Self) -> Self::Output {
@@ -384,7 +394,10 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
 
     pub fn apply_bin(&self, rhs: TapeTerm, f: Box<dyn BinaryFn<T>>) -> Self {
         let self_name = self.tape.nodes.borrow()[self.idx as usize].name.clone();
+        #[cfg(feature = "expr_name")]
         let name = format!("{}({})", f.name(), self_name);
+        #[cfg(not(feature = "expr_name"))]
+        let name = self_name;
         self.tape.term_name(
             name,
             TapeValue::BinaryFn(BinaryFnPayload {
