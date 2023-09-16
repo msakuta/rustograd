@@ -35,13 +35,13 @@ impl BinaryFn<f64> for Atan2Fn {
         _l_derived: TapeIndex,
         _r_derived: TapeIndex,
     ) -> Option<TapeIndex> {
-        let lhs2 = add_mul(nodes, lhs, lhs);
-        let rhs2 = add_mul(nodes, rhs, rhs);
-        let denom = add_add(nodes, lhs2, rhs2);
-        let dlhs = add_div(nodes, rhs, denom);
-        let drhs = add_div(nodes, lhs, denom);
-        let drhs = add_neg(nodes, drhs);
-        Some(add_add(nodes, dlhs, drhs))
+        let lhs2 = add_mul(nodes, lhs, lhs, true);
+        let rhs2 = add_mul(nodes, rhs, rhs, true);
+        let denom = add_add(nodes, lhs2, rhs2, true);
+        let dlhs = add_div(nodes, rhs, denom, true);
+        let drhs = add_div(nodes, lhs, denom, true);
+        let drhs = add_neg(nodes, drhs, true);
+        Some(add_add(nodes, dlhs, drhs, true))
     }
 }
 
@@ -56,7 +56,9 @@ fn main() {
     let mut next = atan2_ab;
     write!(csv, "\"theta\", \"atan2(y x)\", \"d (atan2(y x)) / d y (derive)\", \"d (atan2(y x)) / d x (derive)\", \"d (atan2(y x)) / d y (backprop)\", \"d (atan2(y x)) / d x (backprop)\", ").unwrap();
     for i in 1..4 {
-        let Some(next_i) = next.gen_graph(&a) else { break };
+        let Some(next_i) = next.gen_graph(&a) else {
+            break;
+        };
         next = next_i;
         derivatives.push(next);
         write!(csv, "$(d^{i} x^3)/(d x^{i})$, ").unwrap();
