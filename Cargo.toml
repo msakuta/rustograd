@@ -14,6 +14,8 @@ rustograd-macro = { path = "rustograd-macro" }
 [features]
 default = []
 macro = ["dep:rustograd-macro"]
+# Use an expression as the name of intermediate variable. It can consume a lot of memory in large graphs.
+expr_name = []
 
 [workspace]
 members = [

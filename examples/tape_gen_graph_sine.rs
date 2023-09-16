@@ -39,9 +39,10 @@ impl UnaryFn<f64> for SinFn {
         input: TapeIndex,
         _output: TapeIndex,
         derived: TapeIndex,
+        optim: bool,
     ) -> Option<TapeIndex> {
         let rhs = add_unary_fn(nodes, Box::new(Self(self.0 + 1)), input);
-        Some(add_mul(nodes, derived, rhs))
+        Some(add_mul(nodes, derived, rhs, optim))
     }
 }
 

@@ -30,17 +30,18 @@ impl UnaryFn<f64> for SigmoidFn {
         _input: TapeIndex,
         output: TapeIndex,
         _derived: TapeIndex,
+        optim: bool,
     ) -> Option<TapeIndex> {
         // 1 - sigmoid(x) comes up too often in gen_graph that caching it will remove a lot of
         // redundancy.
         let one_minus_sigmoid = if let Some(cached) = self.node_cache.get() {
             cached
         } else {
-            let cache = add_sub(nodes, TAPE_ONE, output);
+            let cache = add_sub(nodes, TAPE_ONE, output, optim);
             self.node_cache.set(Some(cache));
             cache
         };
-        Some(add_mul(nodes, one_minus_sigmoid, output))
+        Some(add_mul(nodes, one_minus_sigmoid, output, optim))
     }
 }
 
@@ -54,7 +55,7 @@ fn main() {
     let mut next = sin_a;
     write!(csv, "x, $\\mathrm{{sigmoid}}(x)$, ").unwrap();
     for i in 1..4 {
-        next = next.gen_graph(&a).unwrap();
+        next = next.gen_graph_optim(&a, true).unwrap();
         derivatives.push(next);
         write!(csv, "$(d^{i} \\mathrm{{sigmoid}}(x)/(d x^{i})$, ").unwrap();
     }

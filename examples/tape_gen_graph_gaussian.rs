@@ -26,8 +26,9 @@ impl UnaryFn<f64> for ExpFn {
         _input: TapeIndex,
         output: TapeIndex,
         derived: TapeIndex,
+        optim: bool,
     ) -> Option<TapeIndex> {
-        Some(add_mul(nodes, output, derived))
+        Some(add_mul(nodes, output, derived, optim))
     }
 }
 
@@ -58,7 +59,7 @@ fn main() {
     let mut derivatives = vec![exp_a];
     write!(csv, "x, $e^x$, ").unwrap();
     for i in 1..4 {
-        let next_node = next.get().gen_graph_cb(&a, &callback).unwrap();
+        let next_node = next.get().gen_graph_cb(&a, &callback, true).unwrap();
         derivatives.push(next_node);
         write!(csv, "$(d^{i} \\exp(-x^2)/(d x^{i})$, ").unwrap();
         next.set(next_node);

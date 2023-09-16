@@ -31,13 +31,13 @@ fn main() {
         }
     };
 
-    let daba = aba.gen_graph_cb(&a, &callback(None)).unwrap();
+    let daba = aba.gen_graph_cb(&a, &callback(None), false).unwrap();
     aba.eval();
     aba.backprop().unwrap();
     daba.eval_noclear();
 
     let ddaba = daba
-        .gen_graph_cb(&a, &callback(Some(daba.to_tape_index())))
+        .gen_graph_cb(&a, &callback(Some(daba.to_tape_index())), false)
         .unwrap();
     ddaba.eval_noclear();
 

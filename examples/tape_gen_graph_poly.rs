@@ -27,6 +27,7 @@ impl UnaryFn<f64> for PolynomialFn {
         input: TapeIndex,
         _output: TapeIndex,
         _derived: TapeIndex,
+        optim: bool,
     ) -> Option<TapeIndex> {
         if self.0 == 0 {
             None
@@ -37,7 +38,7 @@ impl UnaryFn<f64> for PolynomialFn {
                 add_unary_fn(nodes, Box::new(Self(self.0 - 1)), input)
             };
             let factor = add_value(nodes, self.0 as f64);
-            Some(add_mul(nodes, factor, poly))
+            Some(add_mul(nodes, factor, poly, optim))
         } else {
             Some(1)
         }
@@ -54,7 +55,9 @@ fn main() {
     let mut next = sin_a;
     write!(csv, "x, $x^3$, ").unwrap();
     for i in 1..4 {
-        let Some(next_i) = next.gen_graph(&a) else { break };
+        let Some(next_i) = next.gen_graph(&a) else {
+            break;
+        };
         next = next_i;
         derivatives.push(next);
         write!(csv, "$(d^{i} x^3)/(d x^{i})$, ").unwrap();
