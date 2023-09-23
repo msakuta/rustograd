@@ -290,6 +290,11 @@ impl<'a, T: Tensor> std::ops::Neg for TapeTerm<'a, T> {
 }
 
 impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
+    pub fn name(&self) -> String {
+        let nodes = self.tape.nodes.borrow();
+        nodes[self.idx as usize].name.clone()
+    }
+
     pub fn eval(&self) -> T {
         let mut nodes = self.tape.nodes.borrow_mut();
         clear(&mut nodes);

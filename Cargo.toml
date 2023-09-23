@@ -19,5 +19,6 @@ expr_name = []
 
 [workspace]
 members = [
-    "rustograd-macro"
+    "rustograd-macro",
+    "lander"
 ]
