@@ -14,6 +14,7 @@ pub struct LanderApp<'a> {
     t: f32,
     playback_speed: f32,
     paused: bool,
+    max_iter: usize,
     direct_control: bool,
     lander_state: LanderState,
     lander_model: LanderModel,
@@ -33,14 +34,16 @@ impl<'a> LanderApp<'a> {
     pub fn new() -> Self {
         let tape = Box::leak(Box::new(Tape::new()));
         let a = tape.term("a", 1.23);
+        let max_iter = 100;
         let lander_state = LANDER_STATE;
-        let lander_model = simulate_lander(Vec2 { x: 2., y: 10. }).unwrap();
+        let lander_model = simulate_lander(Vec2 { x: 2., y: 10. }, max_iter).unwrap();
         Self {
             tape,
             a,
             t: 0.,
             playback_speed: 0.1,
             paused: false,
+            max_iter,
             direct_control: false,
             lander_state,
             lander_model,
@@ -80,7 +83,7 @@ impl<'a> LanderApp<'a> {
 
             if response.clicked() {
                 if let Some(mouse_pos) = response.interact_pointer_pos() {
-                    match simulate_lander(from_pos2(mouse_pos)) {
+                    match simulate_lander(from_pos2(mouse_pos), self.max_iter) {
                         Ok(res) => self.lander_model = res,
                         Err(e) => self.error_msg = Some(e.to_string()),
                     }
@@ -161,6 +164,8 @@ impl<'a> eframe::App for LanderApp<'a> {
                     &mut self.playback_speed,
                     (0.1)..=2.,
                 ));
+                ui.label("Max iter:");
+                ui.add(egui::widgets::Slider::new(&mut self.max_iter, 1..=200));
             });
 
         egui::CentralPanel::default()

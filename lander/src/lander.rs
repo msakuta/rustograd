@@ -101,7 +101,10 @@ pub struct LanderModel {
     pub target: Vec2<f64>,
 }
 
-pub(crate) fn simulate_lander(pos: Vec2<f64>) -> Result<LanderModel, GradDoesNotExist> {
+pub(crate) fn simulate_lander(
+    pos: Vec2<f64>,
+    max_iter: usize,
+) -> Result<LanderModel, GradDoesNotExist> {
     let tape = Tape::new();
     let model = get_model(&tape, pos);
 
@@ -121,7 +124,7 @@ pub(crate) fn simulate_lander(pos: Vec2<f64>) -> Result<LanderModel, GradDoesNot
     println!("size: {}, b1: {}", tape.len(), model.lander_hist.len());
 
     let mut rng = Xor128::new(12321);
-    let lander_states = (0..100)
+    let lander_states = (0..max_iter)
         .map(|t| -> Result<LanderState, GradDoesNotExist> {
             let (h_thrust, v_thrust) = optimize(&model, t)?;
             // tape.dump_nodes();
@@ -148,7 +151,6 @@ pub(crate) fn simulate_lander(pos: Vec2<f64>) -> Result<LanderModel, GradDoesNot
 const MAX_THRUST: f64 = 0.11;
 const RATE: f64 = 3e-4;
 const GM: f64 = 0.06;
-const DRAG: f64 = 0.05;
 
 #[derive(Debug)]
 pub struct GradDoesNotExist {
