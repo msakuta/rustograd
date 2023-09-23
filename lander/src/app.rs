@@ -1,20 +1,11 @@
-use std::collections::HashMap;
-
 use eframe::{
     egui::{self, Color32, Frame, Pos2, Rect, Ui},
-    emath::Align2,
-    epaint::{pos2, vec2, FontId},
-    glow::ATOMIC_COUNTER_BUFFER_REFERENCED_BY_FRAGMENT_SHADER,
+    epaint::{pos2, vec2},
 };
-use rustograd::{tape::TapeNode, Tape, TapeTerm};
+use rustograd::{Tape, TapeTerm};
 
 use crate::lander::{lander_simulate_step, simulate_lander, LanderModel, LanderState, Vec2};
 
-const NODE_OFFSET: f32 = 20.;
-const NODE_WIDTH: f32 = 90.;
-const NODE_HEIGHT: f32 = 30.;
-const NODE_X_INTERVAL: f32 = 120.;
-const NODE_Y_INTERVAL: f32 = 50.;
 const SCALE: f32 = 10.;
 
 pub struct LanderApp<'a> {
@@ -151,8 +142,6 @@ impl<'a> LanderApp<'a> {
         });
     }
 }
-
-const GEN_INTERVAL: usize = 100;
 
 impl<'a> eframe::App for LanderApp<'a> {
     fn update(&mut self, ctx: &eframe::egui::Context, _frame: &mut eframe::Frame) {

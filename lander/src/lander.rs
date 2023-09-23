@@ -1,7 +1,5 @@
 use rustograd::{Tape, TapeTerm};
 
-use std::io::Write;
-
 #[derive(Clone, Copy, Debug)]
 pub struct Vec2<T> {
     pub x: T,
@@ -151,8 +149,6 @@ const MAX_THRUST: f64 = 0.11;
 const RATE: f64 = 3e-4;
 const GM: f64 = 0.06;
 const DRAG: f64 = 0.05;
-const TARGET_X: f64 = 20.;
-const TARGET_VX: f64 = 0.5;
 
 #[derive(Debug)]
 pub struct GradDoesNotExist {
@@ -342,7 +338,6 @@ struct Constants<'a> {
     gm: TapeTerm<'a>,
     zero: TapeTerm<'a>,
     half: TapeTerm<'a>,
-    drag: TapeTerm<'a>,
 }
 
 /// A model for the simulation state
@@ -375,7 +370,6 @@ fn get_model<'a>(tape: &'a Tape<f64>, initial_pos: Vec2<f64>) -> Model<'a> {
         gm: tape.term("GM", GM),
         zero: tape.term("0.0", 0.0),
         half: tape.term("0.5", 0.5),
-        drag: tape.term("drag", DRAG),
     };
 
     let mut lander1 = lander;
@@ -384,7 +378,7 @@ fn get_model<'a>(tape: &'a Tape<f64>, initial_pos: Vec2<f64>) -> Model<'a> {
         x: tape.term("x2", 0.),
         y: tape.term("x2", 0.),
     };
-    for t in 0..20 {
+    for _ in 0..20 {
         lander1.simulate_model(tape, &constants, &mut hist1);
     }
 
@@ -405,7 +399,8 @@ fn get_model<'a>(tape: &'a Tape<f64>, initial_pos: Vec2<f64>) -> Model<'a> {
         + hist1
             .iter()
             .fold(None, |acc, cur| {
-                let loss = (cur.velo.x * cur.velo.x + cur.velo.y * cur.velo.y) / (-cur.pos.y).apply("exp", f64::exp, f64::exp)
+                let loss = (cur.velo.x * cur.velo.x + cur.velo.y * cur.velo.y)
+                    / (-cur.pos.y).apply("exp", f64::exp, f64::exp)
                     + cur.heading * cur.heading;
                 if let Some(acc) = acc {
                     Some(acc + loss)
