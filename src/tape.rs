@@ -186,6 +186,25 @@ impl<T: Tensor> Tape<T> {
     pub fn len(&self) -> usize {
         self.nodes.borrow().len()
     }
+
+    pub fn zero(&self) -> TapeTerm<T> {
+        // Be sure to allocate zero in new()
+        TapeTerm { tape: self, idx: 0 }
+    }
+
+    pub fn one(&self) -> TapeTerm<T> {
+        // Be sure to allocate one in new()
+        TapeTerm { tape: self, idx: 1 }
+    }
+}
+
+#[test]
+fn test_zero_one() {
+    let tape = Tape::<f64>::new();
+    let zero = tape.zero();
+    let one = tape.one();
+    assert_eq!((zero + one).eval(), 1.);
+    assert_eq!((zero * one).eval(), 0.);
 }
 
 impl<T: Tensor + std::fmt::Debug> Tape<T> {
