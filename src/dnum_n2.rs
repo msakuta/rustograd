@@ -119,6 +119,17 @@ impl<const N: usize> std::ops::Div for Dnum2<N> {
     }
 }
 
+impl<const N: usize> std::ops::Neg for Dnum2<N> {
+    type Output = Self;
+    fn neg(self) -> Self::Output {
+        let mut ret = self;
+        for v in &mut ret.f {
+            *v = -*v;
+        }
+        ret
+    }
+}
+
 #[test]
 fn test_dual() {
     let d1 = Dnum2::<2>::new(1., 2., 3.);
