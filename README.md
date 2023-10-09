@@ -13,38 +13,40 @@ Inspired by [Andrej Karpathy's video](https://youtu.be/VMj-3S1tku0), it seems no
 
 ## Usage
 
-First, build an expression with usual Rust arithmetics, but wrap the value in `Term::new`.
-Note that you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
+First, allocate an object of type called `Tape`.
+You can create variables with `Tape::term` method.
+Then you can build an expression with usual Rust arithmetics.
 
 ```rust
-    let a = Term::new("a", 123.);
-    let b = Term::new("b", 321.);
-    let c = Term::new("c", 42.);
-    let ab = &a + &b;
-    let abc = &ab * &c;
+let tape = rustograd::Tape::new();
+let a = tape.term("a", 123.);
+let b = tape.term("b", 321.);
+let c = tape.term("c", 42.);
+let ab = a + b;
+let abc = ab * c;
 ```
 
 Next, you can derive the expression with any variable and get the coefficient.
 
 ```rust
-    let abc_a = abc.derive(&a);
-    println!("d((a + b) * c) / da = {}", abc_a); // 42
-    let abc_b = abc.derive(&b);
-    println!("d((a + b) * c) / db = {}", abc_b); // 42
-    let abc_c = abc.derive(&c);
-    println!("d((a + b) * c) / dc = {}", abc_c); // 444
+let abc_a = abc.derive(&a);
+println!("d((a + b) * c) / da = {}", abc_a); // 42
+let abc_b = abc.derive(&b);
+println!("d((a + b) * c) / db = {}", abc_b); // 42
+let abc_c = abc.derive(&c);
+println!("d((a + b) * c) / dc = {}", abc_c); // 444
 ```
 
 Lastly, you can call `backprop` to update all terms at once, much more efficiently than calling `derive` for every one of them.
 
 ```rust
-    abc.backprop();
+abc.backprop();
 ```
 
 It's a little easier to see it with Graphviz than the console, so output the `.dot` file like this:
 
 ```rust
-    abcd.dot(&mut std::io::stdout()).unwrap();
+abcd.dot(&mut std::io::stdout()).unwrap();
 ```
 
 Copy and paste the output into [Graphviz online](https://dreampuf.github.io/GraphvizOnline).
@@ -65,7 +67,10 @@ Rustograd terms come in three flavors.
 * Tape memory arena based terms, `TapeTerm`.
 
 The reference-based term is more efficient when you run the calculation only once, since it doesn't have reference counting overhead.
-However, there is a very strict restriction that every intermediate term is required to live as long as the expression is evaluated.
+However, it has very strict restrictions that is difficult to scale, therefore deprecated.
+
+First, you need to take a reference (like `&a`) to apply arithmetics due to how operator overloading works in Rust.
+Second, every intermediate term is required to live as long as the expression is evaluated.
 It means you can't even compile a function below, because the temporary variable `b` will be dropped when the function returns.
 
 ```rust
