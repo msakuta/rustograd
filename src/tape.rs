@@ -4,7 +4,7 @@
 use std::{cell::RefCell, io::Write};
 
 use crate::{
-    error::ValueNotDefinedError,
+    error::{RangeError, RustogradError, TermWasNotValueError, ValueNotDefinedError},
     tensor::Tensor,
     unary_fn::{PtrUnaryFn, UnaryFn},
     BinaryFn,
@@ -432,12 +432,12 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         )
     }
 
-    pub fn set(&self, value: T) -> Result<(), ()> {
+    pub fn set(&self, value: T) -> Result<(), RustogradError> {
         let mut nodes = self.tape.nodes.borrow_mut();
-        let node = nodes.get_mut(self.idx as usize).ok_or_else(|| ())?;
+        let node = nodes.get_mut(self.idx as usize).ok_or_else(|| RangeError)?;
         match &mut node.value {
             TapeValue::Value(val) => *val = value,
-            _ => return Err(()),
+            _ => return Err(TermWasNotValueError.into()),
         }
         Ok(())
     }
