@@ -372,6 +372,62 @@ $$
 
 ![path-smoothing](images/path_smooth.svg)
 
+
+### Classification
+
+A binary class classification problem, found in [tape_classifier.rs](examples/tape_classifier.rs).
+
+It is a typical applicatoin in a machine learning, where autograd can be useful.
+
+For simplicity, we will present a 2-class classification problem example.
+Suppose we had $t$ samples with $x$ as class labels $(x_i, t_i) (i=0,1,..., N)$ as training samples.
+The weights of a 1-layer neural networks can be written in a matrix form $W$.
+The bias term is written as $\mathbf{b}$.
+Then the output of the first layer can be written as:
+
+$$
+\mathbf{s} = W x + \mathbf{b}
+$$
+
+Consider a case of linearly separable problem, so that only the first layer is sufficient to classify.
+Then we can put the $s$ above into the softmax function:
+
+$$
+y_k = \frac{\exp{s_k}}{\sum_j \exp{s_j}}
+$$
+
+where $f_k$ is the predicted probability of class $k$ and $s_k$ is the $k$-th element of the vector $\mathbf{s}$.
+
+We put it through the cross entropy function:
+
+$$
+E(W) = -\sum_{n=0}^N \{ t_n \ln y_n + (1 - t_n) \ln(1 - y_n) \}
+$$
+
+The parameters $W$ (2 x 2 matrix) and $\mathbf{b}$ (2-vector) can be learned by automatic differentiation (backpropagation).
+The animation below shows the process.
+The intensity of white indicates the probability of class 0.
+
+![classification](images/classification.gif)
+
+You can also apply regularization to avoid overfitting.
+
+$$
+E(W) = -\sum_{n=0}^N \{t_n \ln y_n + (1 - t_n) \ln(1 - y_n) \} - \lambda || W || ^2
+$$
+
+![classification_regularized](images/classification_regularized.gif)
+
+You can extend the method to classify 3 classes.
+
+$$
+E(W_1, ..., W_K) = -\sum_{k=1}^K t_k \ln y_k
+$$
+
+![classification_3classes](images/classification_3classes.gif)
+
+
+
 ## Performance investigation
 
 We can measure the performance of each type of terms.
