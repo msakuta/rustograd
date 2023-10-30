@@ -275,7 +275,7 @@ Below is an animation of gradient descent in action, using gradient calculated b
 
 The computational graph is like below.
 
-![curve_fit_graph](images/curve_fit_graph.svg)
+![curve_fit_graph](images/backprop_curve_fit.gif)
 
 It may not seem so impressive since you can estimate the parameters directly from sample mean and standard deviation like below if the distribution is a Gaussian, but it gets more interesting from the next section.
 
@@ -326,7 +326,7 @@ The model is quite similar to the previous example, but there are 2 Gaussian dis
 
 At this point, the computation graph becomes so complicated that I won't even bother calculating by hand. However, autograd keeps information of factored values and do not repeat redundant calculation.
 
-![peak_separation_graph](images/peak_separation_graph.svg)
+![peak_separation_graph](images/backprop_peak_separation.gif)
 
 There is one notable thing about this graph.
 The variable $x$ is shared among 2 Gaussians, so it appears as a node with 2 children.
