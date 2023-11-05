@@ -197,6 +197,19 @@ impl<T: Tensor> Tape<T> {
         TapeTerm { tape: self, idx: 1 }
     }
 
+    /// Clear the cached data in all terms in the tape. Use it to invalidate the cache when you set a value in a term.
+    ///
+    /// Note that it clears all the terms in the tape, so it is O(N).
+    /// You would want to call it only once after you set a bunch of values.
+    ///
+    /// It may be tempting to think that clearing a subset of the tape terms may be useful,
+    /// but in general it is very difficult to trace which variable should be cleared when you
+    /// update a term value, because the tape terms keep reference towards upstream, not the other
+    /// way around.
+    ///
+    /// One thing we would be able to do is to clear all terms after a given node in the tape vector,
+    /// because the nodes before a given node cannot depend on that node, thus it's safe to keep the cache.
+    /// However, the semantics would be confusing and we should design a good API to make misusing it hard.
     pub fn clear(&self) {
         let mut nodes = self.nodes.borrow_mut();
         clear(&mut nodes);
@@ -319,6 +332,7 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
         nodes[self.idx as usize].name.clone()
     }
 
+    /// Get the tape object that is used to store this term
     pub fn tape(&self) -> &'a Tape<T> {
         self.tape
     }
