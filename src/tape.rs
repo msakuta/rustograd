@@ -196,6 +196,11 @@ impl<T: Tensor> Tape<T> {
         // Be sure to allocate one in new()
         TapeTerm { tape: self, idx: 1 }
     }
+
+    pub fn clear(&self) {
+        let mut nodes = self.nodes.borrow_mut();
+        clear(&mut nodes);
+    }
 }
 
 #[test]
@@ -312,6 +317,10 @@ impl<'a, T: Tensor + 'static> TapeTerm<'a, T> {
     pub fn name(&self) -> String {
         let nodes = self.tape.nodes.borrow();
         nodes[self.idx as usize].name.clone()
+    }
+
+    pub fn tape(&self) -> &'a Tape<T> {
+        self.tape
     }
 
     pub fn eval(&self) -> T {
